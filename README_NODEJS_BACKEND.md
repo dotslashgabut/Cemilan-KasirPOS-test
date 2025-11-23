@@ -38,7 +38,7 @@ DB_HOST=localhost
 PORT=3001
 
 # Keamanan (JWT)
-JWT_SECRET=cemilan_secure_secret_key_2024
+JWT_SECRET=rahasia_dapur_cemilan_kasirpos_2025_secure_key
 ```
 > **Catatan:** Sesuaikan `DB_USER` dan `DB_PASS` dengan konfigurasi MySQL lokal Anda.
 
