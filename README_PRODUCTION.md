@@ -1,6 +1,6 @@
 # Panduan Produksi & Deployment (Production Guide)
 
-Dokumen ini menjelaskan langkah-langkah persiapan sebelum build (build preparation) dan konfigurasi CORS untuk deployment aplikasi ke server produksi (live server).
+Dokumen ini menjelaskan langkah-langkah persiapan sebelum build (build preparation) dan konfigurasi untuk deployment aplikasi ke server produksi (live server) menggunakan **Backend Node.js**.
 
 ## 1. Konfigurasi CORS (Cross-Origin Resource Sharing)
 
@@ -9,28 +9,35 @@ CORS adalah fitur keamanan browser yang membatasi bagaimana web page di satu dom
 ### Kapan Anda Perlu Mengatur CORS?
 
 *   **Skenario A: Satu Domain (Same Origin) - REKOMENDASI**
-    *   Contoh: Frontend di `https://toko-saya.com` dan Backend di `https://toko-saya.com/php_server`.
-    *   **Tindakan:** Anda **TIDAK PERLU** pusing soal CORS. Browser mengizinkan request ke domain yang sama secara otomatis. Anda bisa membiarkan konfigurasi default.
+    *   Contoh: Frontend di `https://toko-saya.com` dan Backend di `https://api.toko-saya.com` (subdomain).
+    *   **Tindakan:** Anda tetap perlu konfigurasi CORS karena subdomain dianggap berbeda origin.
 
 *   **Skenario B: Beda Domain (Cross Origin)**
-    *   Contoh: Frontend di Vercel (`https://toko-saya.vercel.app`) dan Backend di Hosting cPanel (`https://api.toko-saya.com`).
+    *   Contoh: Frontend di Vercel (`https://toko-saya.vercel.app`) dan Backend di VPS/cPanel (`https://api.toko-saya.com`).
     *   **Tindakan:** Anda **WAJIB** mengatur CORS agar frontend diizinkan mengakses backend.
 
 ### Cara Mengatur CORS
 
-Buka file `php_server/config.php` dan edit bagian `$allowed_origins`.
-Secara default, aplikasi dikonfigurasi untuk hanya menerima request dari `http://localhost:5173`.
+Buka file `server/index.js` dan edit konfigurasi CORS di bagian middleware.
+Secara default, aplikasi dikonfigurasi untuk menerima request dari `http://localhost:5173` (development).
 
-```php
-// php_server/config.php
+```javascript
+// server/index.js
 
-$allowed_origins = [
-    'http://localhost:5173',      // Default (Development)
-    // 'https://toko-saya.com',   // <-- TAMBAHKAN DOMAIN PRODUKSI ANDA DI SINI
-];
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',           // Development
+    'https://toko-saya.com',           // <-- TAMBAHKAN DOMAIN PRODUKSI ANDA DI SINI
+    'https://www.toko-saya.com',       // <-- Dengan www jika diperlukan
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 ```
 
-> **Penting:** Jangan gunakan wildcard `*` di produksi karena kurang aman. Spesifikasikan domain Anda.
+> **Penting:** Jangan gunakan wildcard `*` di produksi karena kurang aman. Spesifikasikan domain Anda secara eksplisit.
 
 ---
 
@@ -38,22 +45,40 @@ $allowed_origins = [
 
 Sebelum menjalankan perintah build, pastikan konfigurasi aplikasi sudah benar.
 
-### A. Cek URL API (`services/api.ts`)
+### A. Konfigurasi Environment Variables
 
-Secara default, aplikasi dikonfigurasi untuk mencari backend di folder relatif `/php_server/index.php/api` saat mode produksi.
+1. **Backend (Node.js)**:
+   
+   Buat atau edit file `.env.production` di folder `server`:
+   ```env
+   DB_NAME=nama_database_produksi
+   DB_USER=user_database_produksi
+   DB_PASS=password_database_produksi
+   DB_HOST=localhost
+   PORT=3001
+   JWT_SECRET=rahasia_super_aman_ganti_ini_dengan_string_random
+   NODE_ENV=production
+   ```
 
-Buka `services/api.ts`:
+2. **Frontend (React)**:
+   
+   Buat atau edit file `.env.production` di root project:
+   ```env
+   VITE_API_URL=https://api.toko-saya.com/api
+   ```
+   
+   *   **Jika Backend di Subdomain:** Gunakan URL lengkap seperti contoh di atas.
+   *   **Jika Backend di Path yang Sama:** Gunakan path relatif seperti `/api`.
+
+### B. Cek URL API (`src/services/api.ts`)
+
+Pastikan konfigurasi API menggunakan environment variable dengan benar:
+
 ```typescript
-const isProd = import.meta.env.PROD;
-const API_URL = isProd
-    ? '/php_server/index.php/api' // <-- Pastikan ini sesuai struktur folder server Anda
-    : (import.meta.env.VITE_API_URL || '...');
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 ```
 
-*   **Jika Satu Server (Skenario A):** Biarkan default (`/php_server/index.php/api`). Pastikan Anda mengupload folder `php_server` ke root folder hosting Anda (sejajar dengan file `index.html` hasil build).
-*   **Jika Beda Server (Skenario B):** Ubah baris tersebut menjadi URL lengkap backend Anda, misalnya: `'https://api.toko-saya.com/index.php/api'`.
-
-### B. Jalankan Build
+### C. Jalankan Build Frontend
 
 Jalankan perintah berikut di terminal untuk mengubah kode React menjadi file statis (HTML/CSS/JS) yang siap di-hosting:
 
@@ -66,44 +91,158 @@ Folder `dist` inilah yang berisi aplikasi frontend Anda yang sudah jadi.
 
 ---
 
-## 3. Langkah Deployment (Contoh: cPanel / Shared Hosting)
+## 3. Langkah Deployment
 
-Ini adalah metode paling umum dan mudah (Skenario A).
+### Opsi A: Deployment ke VPS (Ubuntu/Debian)
 
-1.  **Siapkan File:**
-    *   Folder `dist` (hasil build frontend).
-    *   Folder `php_server` (backend).
+Metode ini menggunakan PM2 untuk menjalankan Node.js dan Nginx sebagai reverse proxy.
 
-2.  **Upload ke File Manager (public_html):**
-    *   Upload **isi** dari folder `dist` (file `index.html`, folder `assets`, dll) langsung ke dalam `public_html`.
-    *   Upload folder `php_server` ke dalam `public_html`, sehingga strukturnya menjadi `public_html/php_server`.
-
-    **Struktur Akhir di Server:**
-    ```
-    public_html/
-    ├── assets/          <-- dari dist
-    ├── index.html       <-- dari dist
-    ├── favicon.ico      <-- dari dist
-    └── php_server/      <-- folder backend
-        ├── index.php
-        ├── config.php
-        └── ...
+1.  **Setup Backend:**
+    ```bash
+    # Upload folder server ke VPS (misal: /var/www/cemilan-backend)
+    cd /var/www/cemilan-backend
+    npm install --production
+    
+    # Install PM2 (Process Manager)
+    npm install -g pm2
+    
+    # Jalankan aplikasi dengan PM2
+    pm2 start index.js --name cemilan-api
+    pm2 save
+    pm2 startup
     ```
 
-3.  **Setup Database:**
-    *   Buat database MySQL di cPanel.
-    *   Import file `cemilankasirpos.sql`.
-    *   Edit `public_html/php_server/config.php` dan masukkan detail database (DB_NAME, DB_USER, DB_PASS) dari hosting Anda.
+2.  **Setup Nginx:**
+    ```nginx
+    # /etc/nginx/sites-available/cemilan
+    server {
+        listen 80;
+        server_name api.toko-saya.com;
 
-4.  **Selesai!**
-    *   Buka domain Anda (misal `https://toko-saya.com`). Aplikasi seharusnya berjalan normal.
+        location /api {
+            proxy_pass http://localhost:3001;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+        }
+    }
+    ```
+
+3.  **Setup Frontend:**
+    ```bash
+    # Upload isi folder dist ke /var/www/html atau folder web server Anda
+    ```
+
+4.  **Setup SSL dengan Certbot:**
+    ```bash
+    sudo certbot --nginx -d toko-saya.com -d api.toko-saya.com
+    ```
+
+### Opsi B: Deployment ke cPanel (Shared Hosting)
+
+Lihat panduan lengkap di **[README_CPANEL_HOSTING.md](README_CPANEL_HOSTING.md)** untuk deployment menggunakan fitur "Setup Node.js App" di cPanel.
+
+Ringkasan langkah:
+1.  Upload folder `server` ke hosting (di luar `public_html`).
+2.  Setup aplikasi Node.js melalui menu cPanel.
+3.  Konfigurasi environment variables.
+4.  Upload hasil build frontend (`dist`) ke `public_html`.
+
+### Opsi C: Deployment dengan Docker
+
+Lihat panduan lengkap di **[README_DOCKER.md](README_DOCKER.md)** untuk deployment menggunakan Docker dan Docker Compose.
 
 ---
 
-## 4. Checklist Keamanan Produksi
+## 4. Setup Database Produksi
+
+1.  Buat database MySQL baru di server produksi.
+2.  Import file `cemilankasirpos.sql` atau `cemilankasirpos_big_dummy_data.sql`.
+3.  Pastikan kredensial database di `server/.env.production` sudah benar.
+4.  Verifikasi koneksi database dengan menjalankan backend dan cek log.
+
+---
+
+## 5. Checklist Keamanan Produksi
 
 Sebelum launching, pastikan:
-1.  [ ] `config.php`: `DB_PASS` sudah diisi password database yang kuat.
-2.  [ ] `config.php`: `$allowed_origins` hanya berisi domain Anda sendiri.
-3.  [ ] `config.php`: `display_errors` dimatikan (jika ada settingan ini di php.ini hosting) atau pastikan error tidak tampil ke pengguna.
-4.  [ ] Gunakan **HTTPS** (SSL) untuk domain Anda agar password dan token aman.
+
+### Backend (Node.js)
+- [ ] File `.env` tidak ter-commit ke Git (sudah ada di `.gitignore`).
+- [ ] `JWT_SECRET` menggunakan string random yang kuat (minimal 32 karakter).
+- [ ] `DB_PASS` menggunakan password database yang kuat.
+- [ ] CORS hanya mengizinkan domain produksi Anda (tidak menggunakan `*`).
+- [ ] `NODE_ENV=production` sudah diset.
+- [ ] Rate limiting sudah aktif (cek `server/index.js`).
+- [ ] Helmet.js sudah aktif untuk security headers.
+
+### Frontend
+- [ ] `VITE_API_URL` mengarah ke URL backend produksi yang benar.
+- [ ] Tidak ada console.log atau debug code yang tersisa.
+- [ ] Build production sudah dijalankan (`npm run build`).
+
+### Server & Database
+- [ ] Gunakan **HTTPS** (SSL/TLS) untuk semua koneksi.
+- [ ] Firewall dikonfigurasi dengan benar (hanya port yang diperlukan terbuka).
+- [ ] Database backup otomatis sudah disetup.
+- [ ] Monitoring dan logging sudah aktif (PM2, CloudWatch, dll).
+
+### Testing
+- [ ] Test login dan autentikasi.
+- [ ] Test semua fitur utama (POS, inventory, laporan).
+- [ ] Test di berbagai browser (Chrome, Firefox, Safari).
+- [ ] Test di perangkat mobile.
+
+---
+
+## 6. Troubleshooting Produksi
+
+### Backend Tidak Bisa Diakses
+- Cek apakah Node.js process berjalan (`pm2 status` atau cek cPanel).
+- Cek log error (`pm2 logs` atau stderr.log di cPanel).
+- Verifikasi port dan firewall settings.
+
+### CORS Error
+- Pastikan domain frontend sudah ditambahkan di `corsOptions` di `server/index.js`.
+- Cek apakah HTTPS/HTTP konsisten (jangan mix).
+
+### Database Connection Error
+- Verifikasi kredensial di `.env.production`.
+- Cek apakah MySQL service berjalan.
+- Pastikan user database punya privilege yang cukup.
+
+### 502 Bad Gateway (Nginx)
+- Cek apakah backend Node.js berjalan di port yang benar.
+- Verifikasi konfigurasi `proxy_pass` di Nginx.
+
+---
+
+## 7. Maintenance & Updates
+
+### Update Backend
+```bash
+# Di server
+cd /var/www/cemilan-backend
+git pull origin main
+npm install
+pm2 restart cemilan-api
+```
+
+### Update Frontend
+```bash
+# Di local
+npm run build
+
+# Upload isi folder dist ke server
+# Atau gunakan CI/CD pipeline
+```
+
+### Backup Database
+```bash
+# Buat backup manual
+mysqldump -u user -p database_name > backup_$(date +%Y%m%d).sql
+
+# Atau setup cron job untuk backup otomatis
+```
