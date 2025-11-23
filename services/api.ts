@@ -79,7 +79,7 @@ export const ApiService = {
     getStoreSettings: async (): Promise<StoreSettings> => {
         const defaultSettings: StoreSettings = {
             name: 'Cemilan KasirPOS Nusantara', jargon: '', address: '', phone: '', bankAccount: '', footerMessage: '', notes: '',
-            showAddress: true, showPhone: true, showJargon: true, showBank: true, printerType: '58mm',
+            showAddress: true, showJargon: true, showBank: true, printerType: '58mm',
             autoSyncMySQL: false, useMySQLPrimary: false
         };
 
@@ -343,6 +343,65 @@ export const ApiService = {
         });
         if (!res.ok) throw new Error('Failed to update transaction');
     },
+    deleteTransaction: async (id: string) => {
+        // 1. Get Transaction to revert stock
+        const res = await fetch(`${API_URL}/transactions`, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed to fetch transactions for deletion');
+        const transactions = await res.json();
+        const transaction = transactions.find((t: any) => t.id === id);
+
+        if (transaction) {
+            const parsedTx = parseTransaction(transaction);
+
+            // Revert Stock
+            if (parsedTx.items && parsedTx.items.length > 0) {
+                const isReturn = parsedTx.type === 'RETURN';
+                for (const item of parsedTx.items) {
+                    try {
+                        const productRes = await fetch(`${API_URL}/products/${item.id}`, { headers: getHeaders() });
+                        if (productRes.ok) {
+                            const product = await productRes.json();
+                            const parsedProduct = parseProduct(product);
+                            // Logic reversed from addTransaction
+                            if (isReturn) {
+                                parsedProduct.stock -= item.qty; // Return: stock was increased, so subtract
+                            } else {
+                                parsedProduct.stock += item.qty; // Sale: stock was decreased, so add back
+                            }
+                            await fetch(`${API_URL}/products/${parsedProduct.id}`, {
+                                method: 'PUT',
+                                headers: getHeaders(),
+                                body: JSON.stringify(parsedProduct)
+                            });
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to revert stock for transaction item ${item.id}`, e);
+                    }
+                }
+            }
+
+            // 2. Delete Related CashFlows
+            // Find cashflows that mention this transaction ID
+            const cfRes = await fetch(`${API_URL}/cashflow`, { headers: getHeaders() });
+            if (cfRes.ok) {
+                const cashflows = await cfRes.json();
+                const relatedCfs = cashflows.filter((cf: any) => cf.description.includes(id.substring(0, 6)));
+                for (const cf of relatedCfs) {
+                    await fetch(`${API_URL}/cashflow/${cf.id}`, {
+                        method: 'DELETE',
+                        headers: getHeaders()
+                    });
+                }
+            }
+        }
+
+        // 3. Delete Transaction
+        const deleteRes = await fetch(`${API_URL}/transactions/${id}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+        });
+        if (!deleteRes.ok) throw new Error('Failed to delete transaction');
+    },
 
     // Purchases (Stock In)
     getPurchases: async (): Promise<Purchase[]> => {
@@ -428,6 +487,64 @@ export const ApiService = {
             body: JSON.stringify({ ...purchase, date: formattedDate })
         });
         if (!res.ok) throw new Error('Failed to update purchase');
+    },
+    deletePurchase: async (id: string) => {
+        // 1. Get Purchase to revert stock
+        const res = await fetch(`${API_URL}/purchases`, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed to fetch purchases for deletion');
+        const purchases = await res.json();
+        const purchase = purchases.find((p: any) => p.id === id);
+
+        if (purchase) {
+            const parsedPurchase = parsePurchase(purchase);
+            // Revert Stock
+            if (parsedPurchase.items && parsedPurchase.items.length > 0) {
+                const isReturn = parsedPurchase.type === 'RETURN';
+                for (const item of parsedPurchase.items) {
+                    try {
+                        const productRes = await fetch(`${API_URL}/products/${item.id}`, { headers: getHeaders() });
+                        if (productRes.ok) {
+                            const product = await productRes.json();
+                            const parsedProduct = parseProduct(product);
+                            // Logic reversed from addPurchase
+                            if (isReturn) {
+                                parsedProduct.stock += item.qty; // Return: stock was decreased, so add back
+                            } else {
+                                parsedProduct.stock -= item.qty; // Purchase: stock was increased, so subtract
+                            }
+                            await fetch(`${API_URL}/products/${parsedProduct.id}`, {
+                                method: 'PUT',
+                                headers: getHeaders(),
+                                body: JSON.stringify(parsedProduct)
+                            });
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to revert stock for purchase item ${item.id}`, e);
+                    }
+                }
+            }
+
+            // 2. Delete Related CashFlows
+            // Find cashflows that mention this purchase ID
+            const cfRes = await fetch(`${API_URL}/cashflow`, { headers: getHeaders() });
+            if (cfRes.ok) {
+                const cashflows = await cfRes.json();
+                const relatedCfs = cashflows.filter((cf: any) => cf.description.includes(id.substring(0, 6)));
+                for (const cf of relatedCfs) {
+                    await fetch(`${API_URL}/cashflow/${cf.id}`, {
+                        method: 'DELETE',
+                        headers: getHeaders()
+                    });
+                }
+            }
+        }
+
+        // 3. Delete Purchase
+        const deleteRes = await fetch(`${API_URL}/purchases/${id}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+        });
+        if (!deleteRes.ok) throw new Error('Failed to delete purchase');
     },
 
     // Cash Flow

@@ -115,6 +115,7 @@ export interface Transaction {
   cashierId: string;
   cashierName: string;
   paymentHistory?: PaymentHistoryItem[]; // Track installments
+  isReturned?: boolean; // Flag if transaction has been returned
 }
 
 export enum PurchaseType {

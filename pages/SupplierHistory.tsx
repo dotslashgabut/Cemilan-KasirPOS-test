@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
@@ -12,8 +12,8 @@ interface SupplierHistoryProps {
 }
 
 export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser }) => {
-    const purchases = useData(() => StorageService.getPurchases()) || [];
-    const suppliers = useData(() => StorageService.getSuppliers()) || [];
+    const purchases = useData(() => StorageService.getPurchases(), [], 'purchases') || [];
+    const suppliers = useData(() => StorageService.getSuppliers(), [], 'suppliers') || [];
 
     // State
     const [selectedSupplierId, setSelectedSupplierId] = useState('');
@@ -23,6 +23,15 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
     const [detailPurchase, setDetailPurchase] = useState<Purchase | null>(null);
     const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+
+    // Pagination State
+    const [visibleCount, setVisibleCount] = useState(20);
+    const loadMoreRef = useRef<HTMLDivElement>(null);
+
+    // Reset pagination on filter change
+    useEffect(() => {
+        setVisibleCount(20);
+    }, [selectedSupplierId, startDate, endDate, searchQuery, sortConfig]);
 
     // Load store settings
     useEffect(() => {
@@ -85,7 +94,32 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
         });
 
         return items;
+        return items;
     }, [purchases, selectedSupplierId, startDate, endDate, searchQuery, sortConfig]);
+
+    const visiblePurchases = useMemo(() => filteredPurchases.slice(0, visibleCount), [filteredPurchases, visibleCount]);
+
+    // Infinite Scroll Observer
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting) {
+                    setVisibleCount((prev) => prev + 20);
+                }
+            },
+            { threshold: 0.5 }
+        );
+
+        if (loadMoreRef.current) {
+            observer.observe(loadMoreRef.current);
+        }
+
+        return () => {
+            if (loadMoreRef.current) {
+                observer.unobserve(loadMoreRef.current);
+            }
+        };
+    }, [loadMoreRef.current, filteredPurchases]);
 
     // Calculate totals
     const totals = useMemo(() => {
@@ -334,7 +368,7 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                                     <td colSpan={10} className="p-8 text-center text-slate-400">Tidak ada pembelian.</td>
                                 </tr>
                             )}
-                            {filteredPurchases.map(p => (
+                            {visiblePurchases.map(p => (
                                 <tr key={p.id} onClick={() => setDetailPurchase(p)} className="hover:bg-slate-50 cursor-pointer group">
                                     <td className="p-4 text-slate-600">
                                         <div className="flex flex-col">
@@ -368,6 +402,13 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                                     </td>
                                 </tr>
                             ))}
+                            {visiblePurchases.length < filteredPurchases.length && (
+                                <tr>
+                                    <td colSpan={10} className="p-4 text-center text-slate-400">
+                                        <div ref={loadMoreRef}>Loading more...</div>
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>

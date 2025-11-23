@@ -7,14 +7,14 @@ import { Trash2, Plus, User as UserIcon, Shield, ShieldAlert, Edit2, Save, X, St
 // Default store settings - defined outside component to avoid recreation
 const DEFAULT_STORE_SETTINGS: StoreSettings = {
     name: '', jargon: '', address: '', phone: '', bankAccount: '', footerMessage: '', notes: '',
-    showAddress: true, showJargon: true, showBank: true, showPhone: true, printerType: '58mm'
+    showAddress: true, showJargon: true, showBank: true, printerType: '58mm'
 };
 
 export const Settings: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'store' | 'users' | 'payments' | 'data'>('store');
 
     // User State with useData
-    const users = useData(() => StorageService.getUsers()) || [];
+    const users = useData(() => StorageService.getUsers(), [], 'users') || [];
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -23,7 +23,7 @@ export const Settings: React.FC = () => {
     });
 
     // Store State
-    const loadedSettings = useData(() => StorageService.getStoreSettings());
+    const loadedSettings = useData(() => StorageService.getStoreSettings(), [], 'storeSettings');
     const [storeSettings, setStoreSettings] = useState<StoreSettings>(DEFAULT_STORE_SETTINGS);
 
     useEffect(() => {
@@ -36,7 +36,7 @@ export const Settings: React.FC = () => {
     }, [loadedSettings]);
 
     // Bank State
-    const banks = useData(() => StorageService.getBanks()) || [];
+    const banks = useData(() => StorageService.getBanks(), [], 'banks') || [];
     const [bankForm, setBankForm] = useState<Partial<BankAccount>>({ bankName: '', accountNumber: '', holderName: '' });
     const [isBankModalOpen, setIsBankModalOpen] = useState(false);
     const [editingBankId, setEditingBankId] = useState<string | null>(null);
@@ -372,10 +372,7 @@ export const Settings: React.FC = () => {
                                         <input type="checkbox" checked={storeSettings.showJargon} onChange={e => setStoreSettings({ ...storeSettings, showJargon: e.target.checked })} className="w-4 h-4 text-blue-600 rounded" />
                                         <span className="text-sm text-slate-700">Tampilkan Jargon</span>
                                     </label>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" checked={storeSettings.showPhone} onChange={e => setStoreSettings({ ...storeSettings, showPhone: e.target.checked })} className="w-4 h-4 text-blue-600 rounded" />
-                                        <span className="text-sm text-slate-700">Tampilkan Info No. Telepon</span>
-                                    </label>
+
                                     <label className="flex items-center gap-2 cursor-pointer">
                                         <input type="checkbox" checked={storeSettings.showBank} onChange={e => setStoreSettings({ ...storeSettings, showBank: e.target.checked })} className="w-4 h-4 text-blue-600 rounded" />
                                         <span className="text-sm text-slate-700">Tampilkan Info Bank</span>

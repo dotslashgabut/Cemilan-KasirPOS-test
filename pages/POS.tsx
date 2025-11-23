@@ -7,12 +7,13 @@ import { formatIDR, getPriceByType, generateId, formatDate, toMySQLDate } from '
 import { generatePrintInvoice } from '../utils/printHelpers';
 
 export const POS: React.FC = () => {
-  const products = useData(() => StorageService.getProducts()) || [];
-  const customers = useData(() => StorageService.getCustomers()) || [];
-  const banks = useData(() => StorageService.getBanks()) || [];
+  const products = useData(() => StorageService.getProducts(), [], 'products') || [];
+  const customers = useData(() => StorageService.getCustomers(), [], 'customers') || [];
+  const banks = useData(() => StorageService.getBanks(), [], 'banks') || [];
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
 
   // Customer State
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -30,6 +31,10 @@ export const POS: React.FC = () => {
 
   const currentUser = JSON.parse(localStorage.getItem('pos_current_user') || '{}') as UserType; // Need to grab current user
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Pagination / Virtualization State
+  const [visibleCount, setVisibleCount] = useState(20);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Auto focus search for scanner
@@ -98,10 +103,43 @@ export const POS: React.FC = () => {
     return cart.reduce((sum, item) => sum + (item.finalPrice * item.qty), 0);
   }, [cart]);
 
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.sku.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredProducts = useMemo(() => {
+    return products.filter(p =>
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.sku.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [products, search]);
+
+  const visibleProducts = useMemo(() => {
+    return filteredProducts.slice(0, visibleCount);
+  }, [filteredProducts, visibleCount]);
+
+  // Reset visible count when search changes
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [search, defaultPriceType]);
+
+  // Infinite Scroll Observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => prev + 20);
+        }
+      },
+      { threshold: 0.5 }
+    );
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current);
+    }
+
+    return () => {
+      if (loadMoreRef.current) {
+        observer.unobserve(loadMoreRef.current);
+      }
+    };
+  }, [loadMoreRef.current, filteredProducts]);
 
   const handleCheckout = async () => {
     let paid = parseFloat(amountPaid) || 0;
@@ -231,7 +269,7 @@ export const POS: React.FC = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 content-start">
-          {filteredProducts.map(product => (
+          {visibleProducts.map(product => (
             <button
               key={product.id}
               onClick={() => addToCart(product)}
@@ -239,7 +277,7 @@ export const POS: React.FC = () => {
             >
               <div className="w-full aspect-square bg-slate-100 rounded-lg mb-3 overflow-hidden relative">
                 {product.image && !product.image.includes('picsum.photos') ? (
-                  <img src={product.image} alt={product.name} className="w-full h-full object-cover mix-blend-multiply" />
+                  <img src={product.image} alt={product.name} loading="lazy" className="w-full h-full object-cover mix-blend-multiply" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
                     <ImageIcon size={32} className="text-slate-300" />
@@ -259,24 +297,41 @@ export const POS: React.FC = () => {
               </div>
             </button>
           ))}
+          {/* Sentinel for Infinite Scroll */}
+          {visibleProducts.length < filteredProducts.length && (
+            <div ref={loadMoreRef} className="col-span-full h-10 flex items-center justify-center text-slate-400">
+              Loading more...
+            </div>
+          )}
         </div>
       </div>
 
       {/* Cart Sidebar */}
       <div className="w-full lg:w-96 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col">
         <div className="p-4 border-b border-slate-100 bg-slate-50 rounded-t-2xl">
-          <div className="flex items-center gap-2 mb-3">
-            <User size={18} className="text-slate-400" />
-            <select
-              className="bg-transparent font-medium text-slate-700 focus:outline-none border-b border-dashed border-slate-300 w-full focus:border-blue-500 transition-colors"
-              value={selectedCustomerId}
-              onChange={(e) => setSelectedCustomerId(e.target.value)}
-            >
-              <option value="">Pelanggan Umum (Walk-in)</option>
-              {customers.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+          <div className="mb-3">
+            <input
+              type="text"
+              placeholder="Cari nama pelanggan..."
+              className="w-full px-3 py-2 mb-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={customerSearch}
+              onChange={(e) => setCustomerSearch(e.target.value)}
+            />
+            <div className="flex items-center gap-2">
+              <User size={18} className="text-slate-400" />
+              <select
+                className="bg-transparent font-medium text-slate-700 focus:outline-none border-b border-dashed border-slate-300 w-full focus:border-blue-500 transition-colors"
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+              >
+                <option value="">Pelanggan Umum (Walk-in)</option>
+                {customers
+                  .filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()))
+                  .map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+              </select>
+            </div>
           </div>
           <div className="flex justify-between items-end">
             <span className="text-slate-500 text-sm">Total Tagihan</span>

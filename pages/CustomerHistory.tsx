@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
@@ -12,8 +12,8 @@ interface CustomerHistoryProps {
 }
 
 export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser }) => {
-    const transactions = useData(() => StorageService.getTransactions()) || [];
-    const customers = useData(() => StorageService.getCustomers()) || [];
+    const transactions = useData(() => StorageService.getTransactions(), [], 'transactions') || [];
+    const customers = useData(() => StorageService.getCustomers(), [], 'customers') || [];
 
     // State
     const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -23,6 +23,15 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
     const [detailTransaction, setDetailTransaction] = useState<Transaction | null>(null);
     const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+
+    // Pagination State
+    const [visibleCount, setVisibleCount] = useState(20);
+    const loadMoreRef = useRef<HTMLDivElement>(null);
+
+    // Reset pagination on filter change
+    useEffect(() => {
+        setVisibleCount(20);
+    }, [selectedCustomerId, startDate, endDate, searchQuery, sortConfig]);
 
     // Load store settings
     useEffect(() => {
@@ -91,6 +100,30 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
 
         return items;
     }, [transactions, selectedCustomerId, startDate, endDate, searchQuery, sortConfig, currentUser]);
+
+    const visibleTransactions = useMemo(() => filteredTransactions.slice(0, visibleCount), [filteredTransactions, visibleCount]);
+
+    // Infinite Scroll Observer
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting) {
+                    setVisibleCount((prev) => prev + 20);
+                }
+            },
+            { threshold: 0.5 }
+        );
+
+        if (loadMoreRef.current) {
+            observer.observe(loadMoreRef.current);
+        }
+
+        return () => {
+            if (loadMoreRef.current) {
+                observer.unobserve(loadMoreRef.current);
+            }
+        };
+    }, [loadMoreRef.current, filteredTransactions]);
 
     // Calculate totals
     const totals = useMemo(() => {
@@ -339,7 +372,7 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                     <td colSpan={10} className="p-8 text-center text-slate-400">Tidak ada transaksi.</td>
                                 </tr>
                             )}
-                            {filteredTransactions.map(t => (
+                            {visibleTransactions.map(t => (
                                 <tr key={t.id} onClick={() => setDetailTransaction(t)} className="hover:bg-slate-50 cursor-pointer group">
                                     <td className="p-4 text-slate-600">
                                         <div className="flex flex-col">
@@ -373,6 +406,13 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                     </td>
                                 </tr>
                             ))}
+                            {visibleTransactions.length < filteredTransactions.length && (
+                                <tr>
+                                    <td colSpan={10} className="p-4 text-center text-slate-400">
+                                        <div ref={loadMoreRef}>Loading more...</div>
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>

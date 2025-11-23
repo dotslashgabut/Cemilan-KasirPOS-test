@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
 import { TransactionType, UserRole, User } from '../types';
@@ -10,7 +10,7 @@ interface SoldItemsProps {
 }
 
 export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
-    const transactions = useData(() => StorageService.getTransactions()) || [];
+    const transactions = useData(() => StorageService.getTransactions(), [], 'transactions') || [];
 
     // Filter State
     const [startDate, setStartDate] = useState('');
@@ -19,6 +19,15 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
 
     // Sort State
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+
+    // Pagination State
+    const [visibleCount, setVisibleCount] = useState(20);
+    const loadMoreRef = useRef<HTMLDivElement>(null);
+
+    // Reset pagination on filter change
+    useEffect(() => {
+        setVisibleCount(20);
+    }, [startDate, endDate, searchQuery, sortConfig]);
 
     // Helper for Jakarta Date
     const getJakartaDateStr = (dateStr: string) => {
@@ -87,6 +96,30 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
 
         return items;
     }, [filteredTransactions, searchQuery, sortConfig]);
+
+    const visibleSoldItems = useMemo(() => soldItems.slice(0, visibleCount), [soldItems, visibleCount]);
+
+    // Infinite Scroll Observer
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting) {
+                    setVisibleCount((prev) => prev + 20);
+                }
+            },
+            { threshold: 0.5 }
+        );
+
+        if (loadMoreRef.current) {
+            observer.observe(loadMoreRef.current);
+        }
+
+        return () => {
+            if (loadMoreRef.current) {
+                observer.unobserve(loadMoreRef.current);
+            }
+        };
+    }, [loadMoreRef.current, soldItems]);
 
     const handleSort = (key: string) => {
         setSortConfig(current => ({
@@ -312,7 +345,7 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
                                 <td colSpan={9} className="p-8 text-center text-slate-400">Tidak ada data barang terjual.</td>
                             </tr>
                         )}
-                        {soldItems.map((item, idx) => (
+                        {visibleSoldItems.map((item, idx) => (
                             <tr key={`${item.transactionId}-${idx}`} className="hover:bg-slate-50">
                                 <td className="p-4 text-slate-600">
                                     <div className="flex flex-col">
@@ -336,6 +369,13 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
                                 <td className="p-4 text-slate-600">{item.cashierName}</td>
                             </tr>
                         ))}
+                        {visibleSoldItems.length < soldItems.length && (
+                            <tr>
+                                <td colSpan={9} className="p-4 text-center text-slate-400">
+                                    <div ref={loadMoreRef}>Loading more...</div>
+                                </td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
             </div>

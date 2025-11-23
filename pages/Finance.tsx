@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
@@ -16,12 +16,22 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
     const [activeTab, setActiveTab] = useState<'history' | 'debt_customer' | 'purchase_history' | 'debt_supplier' | 'cashflow' | 'profit_loss'>(defaultTab);
 
     // Data State with useData
-    const transactions = useData(() => StorageService.getTransactions()) || [];
-    const purchases = useData(() => StorageService.getPurchases()) || [];
-    const cashFlows = useData(() => StorageService.getCashFlow()) || [];
-    const suppliers = useData(() => StorageService.getSuppliers()) || [];
-    const banks = useData(() => StorageService.getBanks()) || [];
+    // Data State with useData
+    const transactions = useData(() => StorageService.getTransactions(), [], 'transactions') || [];
+    const purchases = useData(() => StorageService.getPurchases(), [], 'purchases') || [];
+    const cashFlows = useData(() => StorageService.getCashFlow(), [], 'cashflow') || [];
+    const suppliers = useData(() => StorageService.getSuppliers(), [], 'suppliers') || [];
+    const banks = useData(() => StorageService.getBanks(), [], 'banks') || [];
     const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+
+    // Pagination State
+    const [visibleCount, setVisibleCount] = useState(20);
+    const loadMoreRef = useRef<HTMLDivElement>(null);
+
+    // Reset pagination on tab change
+    useEffect(() => {
+        setVisibleCount(20);
+    }, [activeTab]);
 
     // Filter State
     const [startDate, setStartDate] = useState('');
@@ -97,7 +107,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
     const [isReturnPurchaseModalOpen, setIsReturnPurchaseModalOpen] = useState(false);
     const [returnPurchaseItems, setReturnPurchaseItems] = useState<{ id: string, qty: number, price: number, name: string }[]>([]);
-    const products = useData(() => StorageService.getProducts()) || [];
+    const products = useData(() => StorageService.getProducts(), [], 'products') || [];
     const [productSearch, setProductSearch] = useState('');
 
     useEffect(() => {
@@ -106,13 +116,47 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
     // Return Logic
     const openReturnTxModal = (tx: Transaction) => {
-        setReturnTxItems(tx.items.map(i => ({
-            id: i.id,
-            qty: 0,
-            maxQty: i.qty,
-            price: i.finalPrice,
-            name: i.name
-        })));
+        // Prevent returning a return transaction
+        if (tx.type === TransactionType.RETURN) {
+            alert("Transaksi Retur tidak dapat diretur kembali.");
+            return;
+        }
+
+        // Calculate previously returned quantities for this transaction
+        const previousReturns = transactions.filter(t =>
+            t.type === TransactionType.RETURN &&
+            t.originalTransactionId === tx.id
+        );
+
+        const returnedQuantities: Record<string, number> = {};
+        previousReturns.forEach(ret => {
+            ret.items.forEach(item => {
+                returnedQuantities[item.id] = (returnedQuantities[item.id] || 0) + item.qty;
+            });
+        });
+
+        const itemsWithRemainingQty = tx.items.map(i => {
+            const returnedQty = returnedQuantities[i.id] || 0;
+            const remainingQty = Math.max(0, i.qty - returnedQty);
+
+            return {
+                id: i.id,
+                qty: 0,
+                maxQty: remainingQty,
+                price: i.finalPrice,
+                name: i.name
+            };
+        });
+
+        // Check if there are any items left to return
+        const canReturn = itemsWithRemainingQty.some(i => i.maxQty > 0);
+
+        if (!canReturn) {
+            alert("Transaksi ini sudah diretur sepenuhnya (Full Return).");
+            return;
+        }
+
+        setReturnTxItems(itemsWithRemainingQty);
         setIsReturnTxModalOpen(true);
     };
 
@@ -121,13 +165,55 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         const itemsToReturn = returnTxItems.filter(i => i.qty > 0);
         if (itemsToReturn.length === 0) return;
 
-        const totalRefund = itemsToReturn.reduce((sum, i) => sum + (i.qty * i.price), 0);
+        const totalReturnValue = itemsToReturn.reduce((sum, i) => sum + (i.qty * i.price), 0);
 
+        // 1. Hitung Hutang Saat Ini (Sisa Tagihan)
+        const currentDebt = detailTransaction.totalAmount - detailTransaction.amountPaid;
+
+        // 2. Tentukan Alokasi Nilai Retur
+        // Prioritas: Potong Hutang dulu, baru Refund Tunai
+        const cutDebtAmount = Math.min(totalReturnValue, currentDebt);
+        const cashRefundAmount = totalReturnValue - cutDebtAmount;
+
+        const now = new Date().toISOString();
+
+        // 3. Update Transaksi Asal
+        // Always update isReturned status
+        let updatedOriginalTx = {
+            ...detailTransaction,
+            isReturned: true
+        };
+
+        // Jika ada potong hutang, update payment info
+        if (cutDebtAmount > 0) {
+            const newPaid = detailTransaction.amountPaid + cutDebtAmount;
+            const newStatus = newPaid >= detailTransaction.totalAmount ? PaymentStatus.PAID : PaymentStatus.PARTIAL;
+
+            const updatedHistory = [...(detailTransaction.paymentHistory || [])];
+            updatedHistory.push({
+                date: now,
+                amount: cutDebtAmount,
+                method: PaymentMethod.CASH, // Dianggap sebagai pembayaran via retur
+                note: 'Potong Utang (Retur Barang)'
+            });
+
+            updatedOriginalTx = {
+                ...updatedOriginalTx,
+                amountPaid: newPaid,
+                paymentStatus: newStatus,
+                paymentHistory: updatedHistory,
+                change: 0
+            };
+        }
+
+        await StorageService.updateTransaction(updatedOriginalTx);
+
+        // 4. Buat Transaksi Retur (Record Stock In & History)
         const returnTx: Transaction = {
             id: generateId(),
             type: TransactionType.RETURN,
             originalTransactionId: detailTransaction.id,
-            date: new Date().toISOString(),
+            date: now,
             items: itemsToReturn.map(i => {
                 const originalItem = detailTransaction.items.find(oi => oi.id === i.id);
                 return {
@@ -136,12 +222,12 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                     finalPrice: i.price
                 };
             }),
-            totalAmount: -totalRefund, // Negative for return
-            amountPaid: -totalRefund,
+            totalAmount: -totalReturnValue, // Negative for return
+            amountPaid: -totalReturnValue, // Anggap lunas
             change: 0,
             paymentStatus: PaymentStatus.PAID,
-            paymentMethod: PaymentMethod.CASH, // Assume cash refund for now
-            paymentNote: `Retur dari Transaksi #${detailTransaction.id.substring(0, 6)}`,
+            paymentMethod: PaymentMethod.CASH,
+            paymentNote: `Retur dari #${detailTransaction.id.substring(0, 6)}` + (cutDebtAmount > 0 ? ` (Potong Utang: ${formatIDR(cutDebtAmount)})` : ''),
             customerName: detailTransaction.customerName,
             cashierId: currentUser?.id || 'SYSTEM',
             cashierName: currentUser?.name || 'System'
@@ -149,22 +235,29 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
         await StorageService.addTransaction(returnTx);
 
-        // Record Cash Out (Refund)
-        await StorageService.addCashFlow({
-            id: '',
-            date: new Date().toISOString(),
-            type: CashFlowType.OUT,
-            amount: totalRefund,
-            category: 'Retur Penjualan',
-            description: `Refund Retur Transaksi #${detailTransaction.id.substring(0, 6)}`,
-            paymentMethod: PaymentMethod.CASH,
-            userId: currentUser?.id,
-            userName: currentUser?.name
-        });
+        // 5. Record Cash Out (Hanya jika ada uang tunai yang dikembalikan)
+        if (cashRefundAmount > 0) {
+            await StorageService.addCashFlow({
+                id: '',
+                date: now,
+                type: CashFlowType.OUT,
+                amount: cashRefundAmount,
+                category: 'Retur Penjualan',
+                description: `Refund Retur Transaksi #${detailTransaction.id.substring(0, 6)}`,
+                paymentMethod: PaymentMethod.CASH,
+                userId: currentUser?.id,
+                userName: currentUser?.name
+            });
+        }
 
         setIsReturnTxModalOpen(false);
         setDetailTransaction(null);
-        alert('Retur berhasil diproses.');
+
+        let message = 'Retur berhasil diproses.';
+        if (cutDebtAmount > 0) message += `\nDipotong dari hutang: ${formatIDR(cutDebtAmount)}`;
+        if (cashRefundAmount > 0) message += `\nDikembalikan tunai: ${formatIDR(cashRefundAmount)}`;
+
+        alert(message);
     };
 
     const submitReturnPurchase = async () => {
@@ -319,12 +412,41 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         });
     };
 
-    const filteredTransactions = sortItems(applySearch(applyDateFilter(applyCashierFilter(transactions, 'transaction')), 'transaction'));
-    const filteredPurchases = sortItems(applySearch(applyDateFilter(applyCashierFilter(purchases, 'purchase')), 'purchase'));
-    const filteredCashFlows = sortItems(applySearch(applyCategoryFilter(applyDateFilter(applyCashierFilter(cashFlows, 'cashflow'))), 'cashflow'));
+    const filteredTransactions = useMemo(() => sortItems(applySearch(applyDateFilter(applyCashierFilter(transactions, 'transaction')), 'transaction')), [transactions, searchQuery, startDate, endDate, sortConfig, currentUser]);
+    const filteredPurchases = useMemo(() => sortItems(applySearch(applyDateFilter(applyCashierFilter(purchases, 'purchase')), 'purchase')), [purchases, searchQuery, startDate, endDate, sortConfig, currentUser]);
+    const filteredCashFlows = useMemo(() => sortItems(applySearch(applyCategoryFilter(applyDateFilter(applyCashierFilter(cashFlows, 'cashflow'))), 'cashflow')), [cashFlows, searchQuery, startDate, endDate, categoryFilter, sortConfig, currentUser]);
 
-    const receivables = sortItems(applySearch(applyCashierFilter(transactions.filter(t => t.paymentStatus !== PaymentStatus.PAID), 'transaction'), 'transaction'));
-    const payables = sortItems(applySearch(applyCashierFilter(purchases.filter(p => p.paymentStatus !== PaymentStatus.PAID), 'purchase'), 'purchase'));
+    const visibleTransactions = useMemo(() => filteredTransactions.slice(0, visibleCount), [filteredTransactions, visibleCount]);
+    const visiblePurchases = useMemo(() => filteredPurchases.slice(0, visibleCount), [filteredPurchases, visibleCount]);
+    const visibleCashFlows = useMemo(() => filteredCashFlows.slice(0, visibleCount), [filteredCashFlows, visibleCount]);
+
+    const receivables = useMemo(() => sortItems(applySearch(applyCashierFilter(transactions.filter(t => t.paymentStatus !== PaymentStatus.PAID), 'transaction'), 'transaction')), [transactions, searchQuery, sortConfig, currentUser]);
+    const payables = useMemo(() => sortItems(applySearch(applyCashierFilter(purchases.filter(p => p.paymentStatus !== PaymentStatus.PAID), 'purchase'), 'purchase'), 'purchase'), [purchases, searchQuery, sortConfig, currentUser]);
+
+    const visibleReceivables = useMemo(() => receivables.slice(0, visibleCount), [receivables, visibleCount]);
+    const visiblePayables = useMemo(() => payables.slice(0, visibleCount), [payables, visibleCount]);
+
+    // Infinite Scroll Observer
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting) {
+                    setVisibleCount((prev) => prev + 20);
+                }
+            },
+            { threshold: 0.5 }
+        );
+
+        if (loadMoreRef.current) {
+            observer.observe(loadMoreRef.current);
+        }
+
+        return () => {
+            if (loadMoreRef.current) {
+                observer.unobserve(loadMoreRef.current);
+            }
+        };
+    }, [loadMoreRef.current, activeTab, filteredTransactions, filteredPurchases, filteredCashFlows, receivables, payables]);
 
     // --- ACTION HANDLERS ---
 
@@ -579,6 +701,10 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
         const cogs = txs.reduce((sum, t) => {
             const txCogs = t.items.reduce((isum, item) => isum + ((item.hpp || 0) * item.qty), 0);
+            // If return, COGS should decrease (we got the goods back)
+            if (t.type === TransactionType.RETURN) {
+                return sum - txCogs;
+            }
             return sum + txCogs;
         }, 0);
 
@@ -1037,7 +1163,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {filteredTransactions.map(t => (
+                            {visibleTransactions.map(t => (
                                 <tr key={t.id} onClick={() => setDetailTransaction(t)} className="hover:bg-slate-50 cursor-pointer group">
                                     <td className="p-4 font-mono text-xs text-slate-400">#{t.id.substring(0, 6)}</td>
                                     <td className="p-4 text-slate-600">
@@ -1049,9 +1175,14 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     <td className="p-4 font-medium text-slate-800">{t.customerName}</td>
                                     <td className="p-4 text-slate-800">{formatIDR(t.totalAmount)}</td>
                                     <td className="p-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${t.paymentStatus === 'LUNAS' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${t.type === TransactionType.RETURN
+                                            ? 'bg-purple-100 text-purple-600'
+                                            : t.paymentStatus === 'LUNAS'
+                                                ? 'bg-green-100 text-green-600'
+                                                : 'bg-orange-100 text-orange-600'
                                             }`}>
-                                            {t.paymentStatus}
+                                            {t.paymentStatus} {t.type === TransactionType.RETURN && '(Retur)'}
+                                            {t.isReturned && !t.type && ' (Ada Retur)'}
                                         </span>
                                     </td>
                                     <td className="p-4 text-right">
@@ -1072,6 +1203,13 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     </td>
                                 </tr>
                             ))}
+                            {visibleTransactions.length < filteredTransactions.length && (
+                                <tr>
+                                    <td colSpan={6} className="p-4 text-center text-slate-400">
+                                        <div ref={loadMoreRef}>Loading more...</div>
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>
@@ -1092,7 +1230,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                         )}
                         <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
                             {receivables.length === 0 && <div className="p-8 text-center text-slate-400">Tidak ada data piutang.</div>}
-                            {receivables.map(t => {
+                            {visibleReceivables.map(t => {
                                 const remaining = t.totalAmount - t.amountPaid;
                                 return (
                                     <div key={t.id} className={`p-4 flex items-center justify-between cursor-pointer border-l-4 transition-colors ${selectedDebt?.id === t.id ? 'bg-blue-50 border-blue-500' : 'hover:bg-slate-50 border-transparent'}`} onClick={() => setSelectedDebt(t)}>
@@ -1111,6 +1249,11 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     </div>
                                 );
                             })}
+                            {visibleReceivables.length < receivables.length && (
+                                <div className="p-4 text-center text-slate-400">
+                                    <div ref={loadMoreRef}>Loading more...</div>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1234,7 +1377,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {filteredPurchases.map(p => (
+                            {visiblePurchases.map(p => (
                                 <tr key={p.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setDetailPurchase(p)}>
                                     <td className="p-4 font-mono text-xs text-slate-400">#{p.id.substring(0, 6)}</td>
                                     <td className="p-4 text-slate-600">
@@ -1256,6 +1399,13 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     </td>
                                 </tr>
                             ))}
+                            {visiblePurchases.length < filteredPurchases.length && (
+                                <tr>
+                                    <td colSpan={6} className="p-4 text-center text-slate-400">
+                                        <div ref={loadMoreRef}>Loading more...</div>
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>
@@ -1276,7 +1426,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                         )}
                         <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
                             {payables.length === 0 && <div className="p-8 text-center text-slate-400">Tidak ada utang ke supplier.</div>}
-                            {payables.map(p => (
+                            {visiblePayables.map(p => (
                                 <div key={p.id} className={`p-4 cursor-pointer border-l-4 transition-colors ${selectedPayable?.id === p.id ? 'bg-red-50 border-red-500' : 'hover:bg-slate-50 border-transparent'}`} onClick={() => setSelectedPayable(p)}>
                                     <div className="flex justify-between items-start mb-1">
                                         <div>
@@ -1294,6 +1444,11 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     </div>
                                 </div>
                             ))}
+                            {visiblePayables.length < payables.length && (
+                                <div className="p-4 text-center text-slate-400">
+                                    <div ref={loadMoreRef}>Loading more...</div>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1424,7 +1579,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                             </div>
                         )}
                         <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-                            {filteredCashFlows.map(cf => (
+                            {visibleCashFlows.map(cf => (
                                 <div key={cf.id} className="p-4 flex items-center justify-between">
                                     <div className="flex items-center gap-3">
                                         <div className={`p-2 rounded-full ${cf.type === CashFlowType.IN ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
@@ -1446,6 +1601,11 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     </div>
                                 </div>
                             ))}
+                            {visibleCashFlows.length < filteredCashFlows.length && (
+                                <div className="p-4 text-center text-slate-400">
+                                    <div ref={loadMoreRef}>Loading more...</div>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1562,6 +1722,12 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     <span className="font-medium text-slate-900">{detailTransaction.paymentMethod}</span>
                                     {detailTransaction.bankName && <span className="block text-xs text-blue-600">via {detailTransaction.bankName}</span>}
                                 </div>
+                                <div>
+                                    <span className="text-slate-500 block text-xs">Status Retur</span>
+                                    <span className={`font-medium ${detailTransaction.isReturned ? 'text-purple-600' : 'text-slate-900'}`}>
+                                        {detailTransaction.isReturned ? 'Sudah Ada Retur' : '-'}
+                                    </span>
+                                </div>
                             </div>
 
                             <h4 className="font-bold text-sm text-slate-800 mb-2">Barang Dibeli</h4>
@@ -1580,6 +1746,28 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     <span>{formatIDR(detailTransaction.totalAmount)}</span>
                                 </div>
                             </div>
+
+                            {/* Return History */}
+                            {transactions.filter(t => t.type === TransactionType.RETURN && t.originalTransactionId === detailTransaction.id).length > 0 && (
+                                <div className="mb-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Retur</h4>
+                                    <div className="bg-purple-50 rounded-lg p-3 space-y-2 text-sm border border-purple-100">
+                                        {transactions.filter(t => t.type === TransactionType.RETURN && t.originalTransactionId === detailTransaction.id).map((ret, i) => (
+                                            <div key={i} className="flex justify-between border-b border-purple-200 last:border-0 pb-1">
+                                                <div>
+                                                    <div className="flex gap-1 text-xs text-slate-500">
+                                                        <span>{new Date(ret.date).toLocaleDateString('id-ID')}</span>
+                                                        <span className="font-mono bg-white px-1 rounded text-[10px]">{new Date(ret.date).toLocaleTimeString('id-ID')}</span>
+                                                    </div>
+                                                    <span className="text-purple-700 block font-medium">Retur #{ret.id.substring(0, 6)}</span>
+                                                    <span className="text-[10px] text-slate-500">{ret.paymentNote}</span>
+                                                </div>
+                                                <span className="font-bold text-purple-700">{formatIDR(Math.abs(ret.totalAmount))}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Payment History */}
                             <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Pembayaran</h4>
@@ -1613,14 +1801,50 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 </div>
                             </div>
                         </div>
-                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
-                            <button onClick={() => openReturnTxModal(detailTransaction)} className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-100">
-                                <RotateCcw size={16} /> Retur
-                            </button>
-                            <button onClick={() => printTransactionDetail(detailTransaction)} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50">
-                                <Printer size={16} /> Cetak Detail
-                            </button>
-                            <button onClick={() => setDetailTransaction(null)} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold">Tutup</button>
+                        <div className="p-4 border-t border-slate-100 bg-slate-50">
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => setDetailTransaction(null)}
+                                    className="flex-1 py-3 border-2 border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors"
+                                >
+                                    Tutup
+                                </button>
+                                {detailTransaction.type !== TransactionType.RETURN && (
+                                    <button
+                                        onClick={() => openReturnTxModal(detailTransaction)}
+                                        className="flex-1 py-3 bg-orange-100 text-orange-700 font-bold rounded-xl hover:bg-orange-200 transition-colors"
+                                    >
+                                        Retur Transaksi
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => printTransactionDetail(detailTransaction)}
+                                    className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-colors"
+                                >
+                                    Cetak Struk
+                                </button>
+                            </div>
+                            {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
+                                <div className="mt-4 pt-4 border-t border-slate-200">
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('PERINGATAN: Menghapus transaksi ini akan membatalkan semua perubahan stok, menghapus riwayat pembayaran, dan menghapus arus kas terkait. Tindakan ini tidak dapat dibatalkan. Lanjutkan?')) {
+                                                try {
+                                                    await StorageService.deleteTransaction(detailTransaction.id);
+                                                    setDetailTransaction(null);
+                                                    alert('Transaksi berhasil dihapus.');
+                                                } catch (e) {
+                                                    alert('Gagal menghapus transaksi.');
+                                                    console.error(e);
+                                                }
+                                            }
+                                        }}
+                                        className="w-full py-3 border-2 border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors"
+                                    >
+                                        Hapus Transaksi (Admin)
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>,
@@ -1698,14 +1922,47 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 </div>
                             </div>
                         </div>
-                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
-                            <button onClick={() => setIsReturnPurchaseModalOpen(true)} className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-100">
-                                <RotateCcw size={16} /> Retur
-                            </button>
-                            <button onClick={() => printPurchaseDetail(detailPurchase)} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50">
-                                <Printer size={16} /> Cetak Detail
-                            </button>
-                            <button onClick={() => setDetailPurchase(null)} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold">Tutup</button>
+                        <div className="p-4 border-t border-slate-100 bg-slate-50">
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => setDetailPurchase(null)}
+                                    className="flex-1 py-3 border-2 border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors"
+                                >
+                                    Tutup
+                                </button>
+                                {detailPurchase.type !== PurchaseType.RETURN && (
+                                    <button
+                                        onClick={() => setIsReturnPurchaseModalOpen(true)}
+                                        className="flex-1 py-3 bg-orange-100 text-orange-700 font-bold rounded-xl hover:bg-orange-200 transition-colors"
+                                    >
+                                        Retur Pembelian
+                                    </button>
+                                )}
+                                <button onClick={() => printPurchaseDetail(detailPurchase)} className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-colors">
+                                    Cetak Detail
+                                </button>
+                            </div>
+                            {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
+                                <div className="mt-4 pt-4 border-t border-slate-200">
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('PERINGATAN: Menghapus pembelian ini akan membatalkan perubahan stok dan menghapus arus kas terkait. Tindakan ini tidak dapat dibatalkan. Lanjutkan?')) {
+                                                try {
+                                                    await StorageService.deletePurchase(detailPurchase.id);
+                                                    setDetailPurchase(null);
+                                                    alert('Pembelian berhasil dihapus.');
+                                                } catch (e) {
+                                                    alert('Gagal menghapus pembelian.');
+                                                    console.error(e);
+                                                }
+                                            }
+                                        }}
+                                        className="w-full py-3 border-2 border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors"
+                                    >
+                                        Hapus Pembelian (Admin)
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>,
