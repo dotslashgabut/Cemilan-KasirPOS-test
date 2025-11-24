@@ -80,12 +80,19 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
 
         // Sort
         items.sort((a, b) => {
+            if (sortConfig.key === 'date') {
+                const aTime = new Date(a.date).getTime();
+                const bTime = new Date(b.date).getTime();
+                return sortConfig.direction === 'asc' ? aTime - bTime : bTime - aTime;
+            }
+
             let aVal = a[sortConfig.key as keyof Purchase];
             let bVal = b[sortConfig.key as keyof Purchase];
 
-            if (sortConfig.key === 'date') {
-                aVal = new Date(a.date).getTime() as any;
-                bVal = new Date(b.date).getTime() as any;
+            // Handle string comparison (case-insensitive)
+            if (typeof aVal === 'string' && typeof bVal === 'string') {
+                aVal = aVal.toLowerCase() as any;
+                bVal = bVal.toLowerCase() as any;
             }
 
             if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -93,7 +100,6 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
             return 0;
         });
 
-        return items;
         return items;
     }, [purchases, selectedSupplierId, startDate, endDate, searchQuery, sortConfig]);
 
@@ -389,7 +395,7 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                                                 ? 'bg-orange-100 text-orange-600'
                                                 : 'bg-red-100 text-red-600'
                                             }`}>
-                                            {p.paymentStatus}
+                                            {p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus}
                                         </span>
                                     </td>
                                     <td className="p-4 text-slate-600">{p.paymentMethod}</td>
@@ -440,7 +446,9 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                                 </div>
                                 <div>
                                     <span className="text-slate-500 block text-xs">Status</span>
-                                    <span className={`font-bold ${detailPurchase.paymentStatus === 'LUNAS' ? 'text-green-600' : 'text-red-600'}`}>{detailPurchase.paymentStatus}</span>
+                                    <span className={`font-bold ${detailPurchase.paymentStatus === 'LUNAS' ? 'text-green-600' : 'text-red-600'}`}>
+                                        {detailPurchase.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : detailPurchase.paymentStatus}
+                                    </span>
                                 </div>
                             </div>
 
@@ -454,8 +462,71 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                                 <span>{formatIDR(detailPurchase.totalAmount)}</span>
                             </div>
 
+                            {/* Return History (If this is a Purchase) */}
+                            {purchases.filter(p => p.type === 'RETURN' && p.description.includes(detailPurchase.id)).length > 0 && (
+                                <div className="mt-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Retur ke Supplier</h4>
+                                    <div className="bg-orange-50 rounded-lg p-3 space-y-2 text-sm border border-orange-100">
+                                        {purchases
+                                            .filter(p => p.type === 'RETURN' && p.description.includes(detailPurchase.id))
+                                            .map((ret, i) => (
+                                                <div key={i} className="flex justify-between border-b border-orange-200 last:border-0 pb-2">
+                                                    <div>
+                                                        <div className="flex gap-1 text-xs text-slate-500">
+                                                            <span>{new Date(ret.date).toLocaleDateString('id-ID')}</span>
+                                                            <span className="font-mono bg-slate-200 px-1 rounded text-[10px]">{new Date(ret.date).toLocaleTimeString('id-ID')}</span>
+                                                        </div>
+                                                        <span className="text-slate-700 block font-medium">Retur #{ret.id.substring(0, 6)}</span>
+                                                        <div className="text-xs text-slate-500 mt-1 italic">
+                                                            {ret.description}
+                                                        </div>
+                                                    </div>
+                                                    <span className="font-medium text-red-600">{formatIDR(ret.totalAmount)}</span>
+                                                </div>
+                                            ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Original Purchase Info (If this is a Return) */}
+                            {detailPurchase.type === 'RETURN' && (
+                                <div className="mt-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Info Pembelian Induk</h4>
+                                    <div className="bg-blue-50 rounded-lg p-3 text-sm border border-blue-100">
+                                        {(() => {
+                                            // Extract original ID from description if possible, or search by fuzzy match
+                                            // Assuming description format "Retur dari pembelian #ID..."
+                                            const originalIdMatch = detailPurchase.description.match(/#([a-zA-Z0-9-]+)/);
+                                            const originalId = originalIdMatch ? originalIdMatch[1] : null;
+
+                                            const originalTx = originalId ? purchases.find(p => p.id === originalId || p.id.startsWith(originalId)) : null;
+
+                                            if (originalTx) {
+                                                return (
+                                                    <div className="flex justify-between items-center cursor-pointer hover:bg-blue-100 p-2 rounded transition-colors" onClick={() => setDetailPurchase(originalTx)}>
+                                                        <div>
+                                                            <div className="flex gap-1 text-xs text-slate-500">
+                                                                <span>{new Date(originalTx.date).toLocaleDateString('id-ID')}</span>
+                                                            </div>
+                                                            <span className="text-slate-700 font-bold block">#{originalTx.id.substring(0, 8)}</span>
+                                                            <span className="text-xs text-slate-600">Total: {formatIDR(originalTx.totalAmount)}</span>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="text-xs bg-white border border-blue-200 px-2 py-1 rounded text-blue-600 flex items-center gap-1">
+                                                                <Eye size={10} /> Lihat
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            return <span className="text-slate-500 italic">Info pembelian induk tidak ditemukan di deskripsi.</span>;
+                                        })()}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Payment History */}
-                            <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Pembayaran</h4>
+                            <h4 className="font-bold text-sm text-slate-800 mb-2 mt-6">Riwayat Pembayaran</h4>
                             <div className="bg-slate-50 rounded-lg p-3 space-y-2 text-sm">
                                 {detailPurchase.paymentHistory?.map((ph, i) => (
                                     <div key={i} className="flex justify-between border-b border-slate-200 last:border-0 pb-1">

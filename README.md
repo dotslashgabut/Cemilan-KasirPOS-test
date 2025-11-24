@@ -1,5 +1,12 @@
 # Cemilan KasirPOS Nusantara - Testing
 
+![Static Badge](https://img.shields.io/badge/build-ERROR-red?style=for-the-badge)
+
+_**Sedang dalam tahap pengembangan**_
+
+**Bug:**
+- Pencatatan pembelian barang otomatis, retur pembelian, produk tidak terpilih otomatis saat pencatatan retur pembelian
+
 **🍬 Cemilan KasirPOS Nusantara - Testing**
 
 - **Frontend Framework**: [React 19](https://react.dev/)

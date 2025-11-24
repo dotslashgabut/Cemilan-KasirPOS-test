@@ -1,4 +1,4 @@
-import { Product, Transaction, User, CashFlow, Category, Customer, Supplier, Purchase, StoreSettings, BankAccount } from "../types";
+import { Product, Transaction, User, CashFlow, Category, Customer, Supplier, Purchase, StoreSettings, BankAccount, PaymentStatus } from "../types";
 import { generateUUID, toMySQLDate } from "../utils";
 
 const isProd = import.meta.env.PROD;
@@ -344,63 +344,181 @@ export const ApiService = {
         if (!res.ok) throw new Error('Failed to update transaction');
     },
     deleteTransaction: async (id: string) => {
-        // 1. Get Transaction to revert stock
+        // 1. Get all transactions to find related returns and original transaction
         const res = await fetch(`${API_URL}/transactions`, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed to fetch transactions for deletion');
         const transactions = await res.json();
         const transaction = transactions.find((t: any) => t.id === id);
 
-        if (transaction) {
-            const parsedTx = parseTransaction(transaction);
+        if (!transaction) {
+            throw new Error('Transaction not found');
+        }
 
-            // Revert Stock
-            if (parsedTx.items && parsedTx.items.length > 0) {
-                const isReturn = parsedTx.type === 'RETURN';
-                for (const item of parsedTx.items) {
-                    try {
-                        const productRes = await fetch(`${API_URL}/products/${item.id}`, { headers: getHeaders() });
-                        if (productRes.ok) {
-                            const product = await productRes.json();
-                            const parsedProduct = parseProduct(product);
-                            // Logic reversed from addTransaction
-                            if (isReturn) {
-                                parsedProduct.stock -= item.qty; // Return: stock was increased, so subtract
-                            } else {
-                                parsedProduct.stock += item.qty; // Sale: stock was decreased, so add back
-                            }
-                            await fetch(`${API_URL}/products/${parsedProduct.id}`, {
-                                method: 'PUT',
-                                headers: getHeaders(),
-                                body: JSON.stringify(parsedProduct)
-                            });
+        const parsedTx = parseTransaction(transaction);
+
+        // --- LOGIC A: RESTORE DEBT (If deleting a RETURN transaction) ---
+        if (parsedTx.type === 'RETURN' && parsedTx.originalTransactionId) {
+            try {
+                const originalTxRaw = transactions.find((t: any) => t.id === parsedTx.originalTransactionId);
+
+                if (originalTxRaw) {
+                    const originalTx = parseTransaction(originalTxRaw);
+
+                    // Find "Potong Utang" entry in payment history
+                    if (originalTx.paymentHistory && originalTx.paymentHistory.length > 0) {
+                        // Match by approximate time (within 5s) or exact date string
+                        const historyIndex = originalTx.paymentHistory.findIndex(ph =>
+                            ph.note?.includes('Potong Utang') &&
+                            (ph.date === parsedTx.date || Math.abs(new Date(ph.date).getTime() - new Date(parsedTx.date).getTime()) < 5000)
+                        );
+
+                        if (historyIndex !== -1) {
+                            const entryToRemove = originalTx.paymentHistory[historyIndex];
+                            console.log(`Reverting debt cut of ${entryToRemove.amount} from transaction ${originalTx.id}`);
+
+                            const newHistory = [...originalTx.paymentHistory];
+                            newHistory.splice(historyIndex, 1);
+
+                            const newAmountPaid = originalTx.amountPaid - entryToRemove.amount;
+                            const newStatus = newAmountPaid >= originalTx.totalAmount ? PaymentStatus.PAID :
+                                (newAmountPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.UNPAID);
+
+                            // Check if other returns exist
+                            const otherReturns = transactions.some((t: any) =>
+                                t.type === 'RETURN' &&
+                                t.originalTransactionId === originalTx.id &&
+                                t.id !== parsedTx.id
+                            );
+
+                            const updatedOriginalTx = {
+                                ...originalTx,
+                                amountPaid: newAmountPaid,
+                                paymentStatus: newStatus,
+                                paymentHistory: newHistory,
+                                isReturned: otherReturns
+                            };
+
+                            await ApiService.updateTransaction(updatedOriginalTx);
+                            console.log("Original transaction debt restored successfully.");
                         }
-                    } catch (e) {
-                        console.warn(`Failed to revert stock for transaction item ${item.id}`, e);
                     }
                 }
+            } catch (error) {
+                console.error("Failed to restore original transaction debt:", error);
             }
+        }
 
-            // 2. Delete Related CashFlows
-            // Find cashflows that mention this transaction ID
-            const cfRes = await fetch(`${API_URL}/cashflow`, { headers: getHeaders() });
-            if (cfRes.ok) {
-                const cashflows = await cfRes.json();
-                const relatedCfs = cashflows.filter((cf: any) => cf.description.includes(id.substring(0, 6)));
-                for (const cf of relatedCfs) {
-                    await fetch(`${API_URL}/cashflow/${cf.id}`, {
+        // --- LOGIC B: CASCADE DELETE (If deleting a SALE transaction) ---
+        // Find and delete all RETURN transactions linked to this transaction
+        const returnTransactions = transactions.filter((t: any) =>
+            t.type === 'RETURN' && t.originalTransactionId === id
+        );
+
+        if (returnTransactions.length > 0) {
+            console.log(`Found ${returnTransactions.length} return transaction(s) to cascade delete`);
+
+            for (const returnTx of returnTransactions) {
+                try {
+                    const parsedReturn = parseTransaction(returnTx);
+
+                    // Revert Stock for Return Transaction (Return adds stock, so we subtract it back)
+                    if (parsedReturn.items && parsedReturn.items.length > 0) {
+                        for (const item of parsedReturn.items) {
+                            try {
+                                const productRes = await fetch(`${API_URL}/products/${item.id}`, { headers: getHeaders() });
+                                if (productRes.ok) {
+                                    const product = await productRes.json();
+                                    const parsedProduct = parseProduct(product);
+                                    parsedProduct.stock -= item.qty;
+                                    await fetch(`${API_URL}/products/${parsedProduct.id}`, {
+                                        method: 'PUT',
+                                        headers: getHeaders(),
+                                        body: JSON.stringify(parsedProduct)
+                                    });
+                                }
+                            } catch (e) {
+                                console.warn(`Failed to revert stock for return item ${item.id}`, e);
+                            }
+                        }
+                    }
+
+                    // Delete cashflows related to this return transaction
+                    const cfRes = await fetch(`${API_URL}/cashflow`, { headers: getHeaders() });
+                    if (cfRes.ok) {
+                        const cashflows = await cfRes.json();
+                        const returnCfs = cashflows.filter((cf: any) =>
+                            cf.description.includes(returnTx.id.substring(0, 6))
+                        );
+                        for (const cf of returnCfs) {
+                            await fetch(`${API_URL}/cashflow/${cf.id}`, {
+                                method: 'DELETE',
+                                headers: getHeaders()
+                            });
+                        }
+                    }
+
+                    // Delete the return transaction itself
+                    await fetch(`${API_URL}/transactions/${returnTx.id}`, {
                         method: 'DELETE',
                         headers: getHeaders()
                     });
+
+                    console.log(`Deleted return transaction ${returnTx.id}`);
+                } catch (e) {
+                    console.error(`Failed to delete return transaction ${returnTx.id}:`, e);
                 }
             }
         }
 
-        // 3. Delete Transaction
+        // --- LOGIC C: REVERT STOCK FOR MAIN TRANSACTION ---
+        if (parsedTx.items && parsedTx.items.length > 0) {
+            const isReturn = parsedTx.type === 'RETURN';
+            for (const item of parsedTx.items) {
+                try {
+                    const productRes = await fetch(`${API_URL}/products/${item.id}`, { headers: getHeaders() });
+                    if (productRes.ok) {
+                        const product = await productRes.json();
+                        const parsedProduct = parseProduct(product);
+
+                        if (isReturn) {
+                            parsedProduct.stock -= item.qty; // Return: stock was increased, so subtract
+                        } else {
+                            parsedProduct.stock += item.qty; // Sale: stock was decreased, so add back
+                        }
+
+                        await fetch(`${API_URL}/products/${parsedProduct.id}`, {
+                            method: 'PUT',
+                            headers: getHeaders(),
+                            body: JSON.stringify(parsedProduct)
+                        });
+                    }
+                } catch (e) {
+                    console.warn(`Failed to revert stock for transaction item ${item.id}`, e);
+                }
+            }
+        }
+
+        // --- LOGIC D: DELETE RELATED CASHFLOWS ---
+        const cfRes = await fetch(`${API_URL}/cashflow`, { headers: getHeaders() });
+        if (cfRes.ok) {
+            const cashflows = await cfRes.json();
+            const relatedCfs = cashflows.filter((cf: any) => cf.description.includes(id.substring(0, 6)));
+            for (const cf of relatedCfs) {
+                await fetch(`${API_URL}/cashflow/${cf.id}`, {
+                    method: 'DELETE',
+                    headers: getHeaders()
+                });
+            }
+        }
+
+        // --- LOGIC E: DELETE TRANSACTION ---
         const deleteRes = await fetch(`${API_URL}/transactions/${id}`, {
             method: 'DELETE',
             headers: getHeaders()
         });
         if (!deleteRes.ok) throw new Error('Failed to delete transaction');
+
+        console.log(`Successfully deleted transaction ${id} and all related data`);
     },
 
     // Purchases (Stock In)

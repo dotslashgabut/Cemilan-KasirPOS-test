@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
-import { Transaction, PaymentStatus, Customer, UserRole, User, PaymentMethod, StoreSettings } from '../types';
+import { Transaction, PaymentStatus, Customer, UserRole, User, PaymentMethod, StoreSettings, TransactionType } from '../types';
 import { formatIDR, formatDate, exportToCSV } from '../utils';
 import { generatePrintTransactionDetail } from '../utils/printHelpers';
 import { Download, Search, Filter, RotateCcw, X, ArrowUpDown, ArrowUp, ArrowDown, Eye, FileText, Printer } from 'lucide-react';
@@ -85,12 +85,19 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
 
         // Sort
         items.sort((a, b) => {
+            if (sortConfig.key === 'date') {
+                const aTime = new Date(a.date).getTime();
+                const bTime = new Date(b.date).getTime();
+                return sortConfig.direction === 'asc' ? aTime - bTime : bTime - aTime;
+            }
+
             let aVal = a[sortConfig.key as keyof Transaction];
             let bVal = b[sortConfig.key as keyof Transaction];
 
-            if (sortConfig.key === 'date') {
-                aVal = new Date(a.date).getTime() as any;
-                bVal = new Date(b.date).getTime() as any;
+            // Handle string comparison (case-insensitive)
+            if (typeof aVal === 'string' && typeof bVal === 'string') {
+                aVal = aVal.toLowerCase() as any;
+                bVal = bVal.toLowerCase() as any;
             }
 
             if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -159,7 +166,7 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
             t.totalAmount,
             t.amountPaid,
             t.totalAmount - t.amountPaid,
-            t.paymentStatus,
+            t.type === TransactionType.RETURN ? 'RETUR' : t.paymentStatus,
             t.paymentMethod,
             t.cashierName
         ]);
@@ -179,7 +186,7 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                 <td style="text-align:right">${formatIDR(t.totalAmount)}</td>
                 <td style="text-align:right">${formatIDR(t.amountPaid)}</td>
                 <td style="text-align:right">${formatIDR(t.totalAmount - t.amountPaid)}</td>
-                <td>${t.paymentStatus}</td>
+                <td>${t.type === TransactionType.RETURN ? 'RETUR' : t.paymentStatus}</td>
                 <td>${t.cashierName}</td>
             </tr>
         `).join('');
@@ -386,13 +393,15 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                     <td className="p-4 text-green-600">{formatIDR(t.amountPaid)}</td>
                                     <td className="p-4 text-red-600 font-medium">{formatIDR(t.totalAmount - t.amountPaid)}</td>
                                     <td className="p-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${t.paymentStatus === PaymentStatus.PAID
-                                            ? 'bg-green-100 text-green-600'
-                                            : t.paymentStatus === PaymentStatus.PARTIAL
-                                                ? 'bg-orange-100 text-orange-600'
-                                                : 'bg-red-100 text-red-600'
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${t.type === TransactionType.RETURN
+                                            ? 'bg-purple-100 text-purple-600'
+                                            : t.paymentStatus === PaymentStatus.PAID
+                                                ? 'bg-green-100 text-green-600'
+                                                : t.paymentStatus === PaymentStatus.PARTIAL
+                                                    ? 'bg-orange-100 text-orange-600'
+                                                    : 'bg-red-100 text-red-600'
                                             }`}>
-                                            {t.paymentStatus}
+                                            {t.type === TransactionType.RETURN ? 'RETUR' : t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus}
                                         </span>
                                     </td>
                                     <td className="p-4 text-slate-600">{t.paymentMethod}</td>
@@ -448,7 +457,9 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                 </div>
                                 <div>
                                     <span className="text-slate-500 block text-xs">Status</span>
-                                    <span className={`font-bold ${detailTransaction.paymentStatus === 'LUNAS' ? 'text-green-600' : detailTransaction.paymentStatus === 'SEBAGIAN' ? 'text-orange-600' : 'text-red-600'}`}>{detailTransaction.paymentStatus}</span>
+                                    <span className={`font-bold ${detailTransaction.type === TransactionType.RETURN ? 'text-purple-600' : detailTransaction.paymentStatus === 'LUNAS' ? 'text-green-600' : detailTransaction.paymentStatus === 'SEBAGIAN' ? 'text-orange-600' : 'text-red-600'}`}>
+                                        {detailTransaction.type === TransactionType.RETURN ? 'RETUR' : detailTransaction.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : detailTransaction.paymentStatus}
+                                    </span>
                                 </div>
                             </div>
 
@@ -469,8 +480,67 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                 </div>
                             </div>
 
+                            {/* Return History (If this is a Sale) */}
+                            {transactions.filter(t => t.type === TransactionType.RETURN && t.originalTransactionId === detailTransaction.id).length > 0 && (
+                                <div className="mt-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Retur</h4>
+                                    <div className="bg-orange-50 rounded-lg p-3 space-y-2 text-sm border border-orange-100">
+                                        {transactions
+                                            .filter(t => t.type === TransactionType.RETURN && t.originalTransactionId === detailTransaction.id)
+                                            .map((ret, i) => (
+                                                <div key={i} className="flex justify-between border-b border-orange-200 last:border-0 pb-2">
+                                                    <div>
+                                                        <div className="flex gap-1 text-xs text-slate-500">
+                                                            <span>{new Date(ret.date).toLocaleDateString('id-ID')}</span>
+                                                            <span className="font-mono bg-slate-200 px-1 rounded text-[10px]">{new Date(ret.date).toLocaleTimeString('id-ID')}</span>
+                                                        </div>
+                                                        <span className="text-slate-700 block font-medium">Retur #{ret.id.substring(0, 6)}</span>
+                                                        <div className="text-xs text-slate-500 mt-1">
+                                                            {ret.items.map((item, idx) => (
+                                                                <div key={idx}>- {item.name} ({item.qty}x)</div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                    <span className="font-medium text-red-600">{formatIDR(ret.totalAmount)}</span>
+                                                </div>
+                                            ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Original Transaction Info (If this is a Return) */}
+                            {detailTransaction.type === TransactionType.RETURN && detailTransaction.originalTransactionId && (
+                                <div className="mt-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Info Transaksi Induk</h4>
+                                    <div className="bg-blue-50 rounded-lg p-3 text-sm border border-blue-100">
+                                        {(() => {
+                                            const originalTx = transactions.find(t => t.id === detailTransaction.originalTransactionId);
+                                            if (originalTx) {
+                                                return (
+                                                    <div className="flex justify-between items-center cursor-pointer hover:bg-blue-100 p-2 rounded transition-colors" onClick={() => setDetailTransaction(originalTx)}>
+                                                        <div>
+                                                            <div className="flex gap-1 text-xs text-slate-500">
+                                                                <span>{new Date(originalTx.date).toLocaleDateString('id-ID')}</span>
+                                                            </div>
+                                                            <span className="text-slate-700 font-bold block">#{originalTx.id.substring(0, 8)}</span>
+                                                            <span className="text-xs text-slate-600">Total: {formatIDR(originalTx.totalAmount)}</span>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="text-xs bg-white border border-blue-200 px-2 py-1 rounded text-blue-600 flex items-center gap-1">
+                                                                <Eye size={10} /> Lihat
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            return <span className="text-slate-500 italic">Transaksi induk tidak ditemukan</span>;
+                                        })()}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Payment History */}
-                            <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Pembayaran</h4>
+                            <h4 className="font-bold text-sm text-slate-800 mb-2 mt-6">Riwayat Pembayaran</h4>
                             <div className="bg-slate-50 rounded-lg p-3 space-y-2 text-sm">
                                 {detailTransaction.paymentHistory?.map((ph, i) => (
                                     <div key={i} className="flex justify-between border-b border-slate-200 last:border-0 pb-1">

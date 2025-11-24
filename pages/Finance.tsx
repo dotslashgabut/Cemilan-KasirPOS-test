@@ -5,7 +5,7 @@ import { StorageService } from '../services/storage';
 import { Transaction, PaymentStatus, CashFlow, CashFlowType, Purchase, Supplier, PaymentMethod, CashFlow as CashFlowTypeInterface, StoreSettings, BankAccount, User, UserRole, TransactionType, PurchaseType } from '../types';
 import { formatIDR, formatDate, exportToCSV, generateId } from '../utils';
 import { generatePrintInvoice, generatePrintGoodsNote, generatePrintSuratJalan, generatePrintTransactionDetail, generatePrintPurchaseDetail } from '../utils/printHelpers';
-import { ArrowDownLeft, ArrowUpRight, Download, Plus, Printer, FileText, Filter, RotateCcw, X, Eye, ShoppingBag, Calendar, Clock, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Download, Plus, Printer, FileText, Filter, RotateCcw, X, Eye, ShoppingBag, Calendar, Clock, Search, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
 
 interface FinanceProps {
     currentUser: User | null;
@@ -92,6 +92,9 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
     const [purchaseForm, setPurchaseForm] = useState({
         supplierId: '', description: '', amount: '', paid: '', paymentMethod: PaymentMethod.CASH, bankId: ''
     });
+    const [purchaseItems, setPurchaseItems] = useState<{ id: string, qty: number, price: number, name: string }[]>([]);
+    const [purchaseMode, setPurchaseMode] = useState<'items' | 'manual'>('items');
+    const [purchaseProductSearch, setPurchaseProductSearch] = useState('');
 
     // Cashflow Entry State
     const [cfAmount, setCfAmount] = useState('');
@@ -109,6 +112,10 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
     const [returnPurchaseItems, setReturnPurchaseItems] = useState<{ id: string, qty: number, price: number, name: string }[]>([]);
     const products = useData(() => StorageService.getProducts(), [], 'products') || [];
     const [productSearch, setProductSearch] = useState('');
+    const [returnPurchaseMethod, setReturnPurchaseMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
+    const [returnPurchaseBankId, setReturnPurchaseBankId] = useState('');
+    const [returnPurchaseManualAmount, setReturnPurchaseManualAmount] = useState('');
+    const [returnPurchaseMode, setReturnPurchaseMode] = useState<'items' | 'manual'>('items');
 
     useEffect(() => {
         StorageService.getStoreSettings().then(setStoreSettings);
@@ -262,10 +269,34 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
     const submitReturnPurchase = async () => {
         if (!detailPurchase) return;
-        const itemsToReturn = returnPurchaseItems.filter(i => i.qty > 0);
-        if (itemsToReturn.length === 0) return;
 
-        const totalRefund = itemsToReturn.reduce((sum, i) => sum + (i.qty * i.price), 0);
+        let totalRefund = 0;
+        let itemsToReturn: any[] = [];
+        let description = '';
+
+        if (returnPurchaseMode === 'items') {
+            itemsToReturn = returnPurchaseItems.filter(i => i.qty > 0);
+            if (itemsToReturn.length === 0) {
+                alert("Pilih setidaknya satu barang untuk diretur.");
+                return;
+            }
+            totalRefund = itemsToReturn.reduce((sum, i) => sum + (i.qty * i.price), 0);
+            description = `Retur Barang: ${itemsToReturn.map(i => i.name).join(', ')}`;
+        } else {
+            totalRefund = parseFloat(returnPurchaseManualAmount.replace(/[^0-9]/g, ''));
+            if (totalRefund <= 0) {
+                alert("Masukkan nominal retur yang valid.");
+                return;
+            }
+            description = `Retur Nominal (Manual) dari Pembelian #${detailPurchase.id.substring(0, 6)}`;
+        }
+
+        if (returnPurchaseMethod === PaymentMethod.TRANSFER && !returnPurchaseBankId) {
+            alert("Pilih rekening bank tujuan pengembalian dana.");
+            return;
+        }
+
+        const selectedBank = banks.find(b => b.id === returnPurchaseBankId);
 
         const returnPurchase: Purchase = {
             id: generateId(),
@@ -273,8 +304,8 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             date: new Date().toISOString(),
             supplierId: detailPurchase.supplierId,
             supplierName: detailPurchase.supplierName,
-            description: `Retur Barang: ${itemsToReturn.map(i => i.name).join(', ')}`,
-            items: itemsToReturn.map(i => {
+            description: description,
+            items: returnPurchaseMode === 'items' ? itemsToReturn.map(i => {
                 const product = products.find(p => p.id === i.id);
                 return {
                     ...product,
@@ -282,11 +313,13 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                     finalPrice: i.price,
                     selectedPriceType: 'UMUM'
                 } as any;
-            }),
+            }) : [],
             totalAmount: -totalRefund,
             amountPaid: -totalRefund,
             paymentStatus: PaymentStatus.PAID,
-            paymentMethod: PaymentMethod.CASH,
+            paymentMethod: returnPurchaseMethod,
+            bankId: returnPurchaseBankId || undefined,
+            bankName: selectedBank?.bankName,
             paymentHistory: []
         };
 
@@ -299,14 +332,20 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             type: CashFlowType.IN,
             amount: totalRefund,
             category: 'Retur Pembelian',
-            description: `Refund Retur Pembelian dari ${detailPurchase.supplierName}`,
-            paymentMethod: PaymentMethod.CASH,
+            description: `Refund Retur Pembelian dari ${detailPurchase.supplierName} via ${returnPurchaseMethod}${selectedBank ? ` (${selectedBank.bankName})` : ''}`,
+            paymentMethod: returnPurchaseMethod,
+            bankId: returnPurchaseBankId || undefined,
+            bankName: selectedBank?.bankName,
             userId: currentUser?.id,
             userName: currentUser?.name
         });
 
         setIsReturnPurchaseModalOpen(false);
         setDetailPurchase(null);
+        setReturnPurchaseItems([]);
+        setReturnPurchaseManualAmount('');
+        setReturnPurchaseMethod(PaymentMethod.CASH);
+        setReturnPurchaseBankId('');
         alert('Retur pembelian berhasil diproses.');
     };
 
@@ -395,13 +434,21 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         if (!sortConfig) return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Default desc date
 
         return [...items].sort((a, b) => {
-            let aVal = a[sortConfig.key];
-            let bVal = b[sortConfig.key];
+            let aVal: any = a[sortConfig.key];
+            let bVal: any = b[sortConfig.key];
+
+            // Special handling for paymentStatus when sorting transactions with RETURN type
+            if (sortConfig.key === 'paymentStatus') {
+                // If item is a RETURN transaction, use "RETUR" as the sort value
+                aVal = a.type === TransactionType.RETURN ? 'RETUR' : aVal;
+                bVal = b.type === TransactionType.RETURN ? 'RETUR' : bVal;
+            }
 
             if (sortConfig.key === 'date') {
-                aVal = new Date(aVal).getTime();
-                bVal = new Date(bVal).getTime();
-            } else if (typeof aVal === 'string') {
+                const aTime = new Date(a.date).getTime();
+                const bTime = new Date(b.date).getTime();
+                return sortConfig.direction === 'asc' ? aTime - bTime : bTime - aTime;
+            } else if (typeof aVal === 'string' && typeof bVal === 'string') {
                 aVal = aVal.toLowerCase();
                 bVal = bVal.toLowerCase();
             }
@@ -421,7 +468,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
     const visibleCashFlows = useMemo(() => filteredCashFlows.slice(0, visibleCount), [filteredCashFlows, visibleCount]);
 
     const receivables = useMemo(() => sortItems(applySearch(applyCashierFilter(transactions.filter(t => t.paymentStatus !== PaymentStatus.PAID), 'transaction'), 'transaction')), [transactions, searchQuery, sortConfig, currentUser]);
-    const payables = useMemo(() => sortItems(applySearch(applyCashierFilter(purchases.filter(p => p.paymentStatus !== PaymentStatus.PAID), 'purchase'), 'purchase'), 'purchase'), [purchases, searchQuery, sortConfig, currentUser]);
+    const payables = useMemo(() => sortItems(applySearch(applyCashierFilter(purchases.filter(p => p.paymentStatus !== PaymentStatus.PAID), 'purchase'), 'purchase')), [purchases, searchQuery, sortConfig, currentUser]);
 
     const visibleReceivables = useMemo(() => receivables.slice(0, visibleCount), [receivables, visibleCount]);
     const visiblePayables = useMemo(() => payables.slice(0, visibleCount), [payables, visibleCount]);
@@ -562,24 +609,44 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
     };
 
     const handlePurchaseSubmit = async () => {
-        if (!purchaseForm.supplierId || !purchaseForm.amount) {
-            alert("Harap lengkapi data Supplier dan Total Pembelian!");
+        if (!purchaseForm.supplierId) {
+            alert("Harap pilih Supplier!");
             return;
         }
 
-        const total = parseFloat(purchaseForm.amount.replace(/[^0-9]/g, ''));
+        let total = 0;
+        let description = purchaseForm.description;
+        let items: any[] = [];
+
+        if (purchaseMode === 'items') {
+            if (purchaseItems.length === 0) {
+                alert("Pilih setidaknya satu barang untuk dibeli.");
+                return;
+            }
+            total = purchaseItems.reduce((sum, i) => sum + (i.qty * i.price), 0);
+            description = `Pembelian Stok: ${purchaseItems.map(i => i.name).join(', ')}`;
+            items = purchaseItems.map(i => {
+                const product = products.find(p => p.id === i.id);
+                return {
+                    ...product,
+                    qty: i.qty,
+                    finalPrice: i.price, // Purchase price (HPP)
+                    selectedPriceType: 'UMUM'
+                };
+            });
+        } else {
+            total = parseFloat(purchaseForm.amount.replace(/[^0-9]/g, ''));
+            if (total <= 0) {
+                alert("Total pembelian harus lebih dari 0!");
+                return;
+            }
+            if (!description || description.trim() === '') {
+                alert("Harap isi deskripsi/keterangan pembelian!");
+                return;
+            }
+        }
+
         const paid = parseFloat(purchaseForm.paid.replace(/[^0-9]/g, '')) || 0;
-
-        if (total <= 0) {
-            alert("Total pembelian harus lebih dari 0!");
-            return;
-        }
-
-        if (!purchaseForm.description || purchaseForm.description.trim() === '') {
-            alert("Harap isi deskripsi/keterangan pembelian!");
-            return;
-        }
-
         const supplier = suppliers.find(s => s.id === purchaseForm.supplierId);
 
         if (!supplier) {
@@ -587,7 +654,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             return;
         }
 
-        const now = new Date().toISOString(); // Capture exact time
+        const now = new Date().toISOString();
 
         if (purchaseForm.paymentMethod === PaymentMethod.TRANSFER && !purchaseForm.bankId && paid > 0) {
             alert("Pilih rekening bank untuk pembayaran transfer.");
@@ -602,13 +669,14 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             date: now,
             supplierId: purchaseForm.supplierId,
             supplierName: supplier.name,
-            description: purchaseForm.description.trim(),
+            description: description.trim(),
             totalAmount: total,
             amountPaid: paid,
             paymentMethod: purchaseForm.paymentMethod,
             paymentStatus: status,
             bankId: purchaseForm.bankId || undefined,
             bankName: selectedBank?.bankName,
+            items: items,
             paymentHistory: paid > 0 ? [{
                 date: now,
                 amount: paid,
@@ -633,7 +701,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                     type: CashFlowType.OUT,
                     amount: paid,
                     category: 'Pembelian Stok',
-                    description: `Pembelian dari ${supplier.name}: ${purchaseForm.description} via ${purchaseForm.paymentMethod} ${selectedBank ? `(${selectedBank.bankName})` : ''}`,
+                    description: `Pembelian dari ${supplier.name}: ${description} via ${purchaseForm.paymentMethod} ${selectedBank ? `(${selectedBank.bankName})` : ''}`,
                     paymentMethod: purchaseForm.paymentMethod,
                     bankId: purchaseForm.bankId || undefined,
                     bankName: selectedBank?.bankName,
@@ -650,6 +718,8 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
             setIsPurchaseModalOpen(false);
             setPurchaseForm({ supplierId: '', description: '', amount: '', paid: '', paymentMethod: PaymentMethod.CASH, bankId: '' });
+            setPurchaseItems([]);
+            setPurchaseMode('items');
         } catch (error) {
             console.error("❌ Error saving purchase:", error);
             alert(`❌ Gagal menyimpan pembelian!\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nSilakan cek console untuk detail.`);
@@ -697,25 +767,36 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         const txs = filteredTransactions; // Already date filtered
         const cfs = filteredCashFlows; // Already date filtered
 
+        // Calculate Revenue: Penjualan normal (positive) + Retur (negative from totalAmount)
+        // Transaksi RETURN sudah memiliki totalAmount negatif, jadi langsung dijumlahkan
         const revenue = txs.reduce((sum, t) => sum + t.totalAmount, 0);
 
+        // Calculate COGS (HPP): 
+        // - Untuk penjualan normal: tambahkan HPP
+        // - Untuk retur: kurangi HPP (karena barang kembali ke stok)
         const cogs = txs.reduce((sum, t) => {
             const txCogs = t.items.reduce((isum, item) => isum + ((item.hpp || 0) * item.qty), 0);
-            // If return, COGS should decrease (we got the goods back)
+
+            // Untuk transaksi RETURN, COGS harus dikurangi (barang kembali)
+            // Karena totalAmount RETURN sudah negatif di revenue, kita juga kurangi COGS-nya
             if (t.type === TransactionType.RETURN) {
                 return sum - txCogs;
             }
+
+            // Untuk transaksi normal, COGS ditambahkan
             return sum + txCogs;
         }, 0);
 
         const grossProfit = revenue - cogs;
 
-        // Expenses: CashFlow OUT excluding Stock Purchase and Debt Repayment (which are asset/liability movements)
-        // We assume 'Pembelian Stok' and 'Pelunasan Utang Supplier' are not operational expenses in this simple view.
-        // However, 'Operasional' and others are.
+        // Expenses: CashFlow OUT excluding Stock Purchase, Debt Repayment, and Returns (which are asset/liability movements)
+        // We assume 'Pembelian Stok', 'Pelunasan Utang Supplier', 'Retur Penjualan', and 'Retur Pembelian' are not operational expenses.
+        // Only 'Operasional' and other true expense categories are included.
         const expenses = cfs
             .filter(c => c.type === CashFlowType.OUT &&
                 c.category !== 'Pembelian Stok' &&
+                c.category !== 'Retur Penjualan' &&
+                c.category !== 'Retur Pembelian' &&
                 !c.category.includes('Pelunasan Utang'))
             .reduce((sum, c) => sum + c.amount, 0);
 
@@ -1179,9 +1260,11 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                             ? 'bg-purple-100 text-purple-600'
                                             : t.paymentStatus === 'LUNAS'
                                                 ? 'bg-green-100 text-green-600'
-                                                : 'bg-orange-100 text-orange-600'
+                                                : t.paymentStatus === 'BELUM_LUNAS'
+                                                    ? 'bg-red-100 text-red-600'
+                                                    : 'bg-orange-100 text-orange-600'
                                             }`}>
-                                            {t.paymentStatus} {t.type === TransactionType.RETURN && '(Retur)'}
+                                            {t.type === TransactionType.RETURN ? 'RETUR' : t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus}
                                             {t.isReturned && !t.type && ' (Ada Retur)'}
                                         </span>
                                     </td>
@@ -1264,6 +1347,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 <div className="p-3 bg-blue-50 rounded-lg text-blue-800 text-sm">
                                     <span className="block text-xs text-blue-400 uppercase tracking-wider font-bold mb-1">Pelanggan</span>
                                     <span className="font-bold text-lg">{selectedDebt.customerName}</span>
+                                    <div className="text-xs text-blue-600 mt-1 font-mono">Ref: #{selectedDebt.id}</div>
                                 </div>
                                 <div>
                                     <label className="text-xs text-slate-500">Sisa Tagihan</label>
@@ -1340,7 +1424,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 </div>
                                 <button
                                     onClick={handleRepaymentCustomer}
-                                    className="w-full bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700"
+                                    className="w-full bg-slate-900 text-white py-2 rounded-lg font-semibold hover:bg-slate-800"
                                 >
                                     Proses Pembayaran
                                 </button>
@@ -1394,7 +1478,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                             p.paymentStatus === 'SEBAGIAN' ? 'bg-orange-100 text-orange-600' :
                                                 'bg-red-100 text-red-600'
                                             }`}>
-                                            {p.paymentStatus}
+                                            {p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus}
                                         </span>
                                     </td>
                                 </tr>
@@ -1459,6 +1543,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 <div className="p-3 bg-red-50 rounded-lg text-red-800 text-sm">
                                     <span className="block text-xs text-red-400 uppercase tracking-wider font-bold mb-1">Supplier</span>
                                     <span className="font-bold text-lg">{selectedPayable.supplierName}</span>
+                                    <div className="text-xs text-red-600 mt-1 font-mono">Ref: #{selectedPayable.id}</div>
                                 </div>
                                 <div>
                                     <label className="text-xs text-slate-500">Sisa Utang</label>
@@ -1747,24 +1832,61 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 </div>
                             </div>
 
-                            {/* Return History */}
+                            {/* Return History (If this is a Sale) */}
                             {transactions.filter(t => t.type === TransactionType.RETURN && t.originalTransactionId === detailTransaction.id).length > 0 && (
                                 <div className="mb-6">
                                     <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Retur</h4>
-                                    <div className="bg-purple-50 rounded-lg p-3 space-y-2 text-sm border border-purple-100">
-                                        {transactions.filter(t => t.type === TransactionType.RETURN && t.originalTransactionId === detailTransaction.id).map((ret, i) => (
-                                            <div key={i} className="flex justify-between border-b border-purple-200 last:border-0 pb-1">
-                                                <div>
-                                                    <div className="flex gap-1 text-xs text-slate-500">
-                                                        <span>{new Date(ret.date).toLocaleDateString('id-ID')}</span>
-                                                        <span className="font-mono bg-white px-1 rounded text-[10px]">{new Date(ret.date).toLocaleTimeString('id-ID')}</span>
+                                    <div className="bg-orange-50 rounded-lg p-3 space-y-2 text-sm border border-orange-100">
+                                        {transactions
+                                            .filter(t => t.type === TransactionType.RETURN && t.originalTransactionId === detailTransaction.id)
+                                            .map((ret, i) => (
+                                                <div key={i} className="flex justify-between border-b border-orange-200 last:border-0 pb-2">
+                                                    <div>
+                                                        <div className="flex gap-1 text-xs text-slate-500">
+                                                            <span>{new Date(ret.date).toLocaleDateString('id-ID')}</span>
+                                                            <span className="font-mono bg-slate-200 px-1 rounded text-[10px]">{new Date(ret.date).toLocaleTimeString('id-ID')}</span>
+                                                        </div>
+                                                        <span className="text-slate-700 block font-medium">Retur #{ret.id.substring(0, 6)}</span>
+                                                        <div className="text-xs text-slate-500 mt-1">
+                                                            {ret.items.map((item, idx) => (
+                                                                <div key={idx}>- {item.name} ({item.qty}x)</div>
+                                                            ))}
+                                                        </div>
                                                     </div>
-                                                    <span className="text-purple-700 block font-medium">Retur #{ret.id.substring(0, 6)}</span>
-                                                    <span className="text-[10px] text-slate-500">{ret.paymentNote}</span>
+                                                    <span className="font-medium text-red-600">{formatIDR(ret.totalAmount)}</span>
                                                 </div>
-                                                <span className="font-bold text-purple-700">{formatIDR(Math.abs(ret.totalAmount))}</span>
-                                            </div>
-                                        ))}
+                                            ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Original Transaction Info (If this is a Return) */}
+                            {detailTransaction.type === TransactionType.RETURN && detailTransaction.originalTransactionId && (
+                                <div className="mb-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Info Transaksi Induk</h4>
+                                    <div className="bg-blue-50 rounded-lg p-3 text-sm border border-blue-100">
+                                        {(() => {
+                                            const originalTx = transactions.find(t => t.id === detailTransaction.originalTransactionId);
+                                            if (originalTx) {
+                                                return (
+                                                    <div className="flex justify-between items-center cursor-pointer hover:bg-blue-100 p-2 rounded transition-colors" onClick={() => setDetailTransaction(originalTx)}>
+                                                        <div>
+                                                            <div className="flex gap-1 text-xs text-slate-500">
+                                                                <span>{new Date(originalTx.date).toLocaleDateString('id-ID')}</span>
+                                                            </div>
+                                                            <span className="text-slate-700 font-bold block">#{originalTx.id.substring(0, 8)}</span>
+                                                            <span className="text-xs text-slate-600">Total: {formatIDR(originalTx.totalAmount)}</span>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="text-xs bg-white border border-blue-200 px-2 py-1 rounded text-blue-600 flex items-center gap-1">
+                                                                <Eye size={10} /> Lihat
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            return <span className="text-slate-500 italic">Transaksi induk tidak ditemukan</span>;
+                                        })()}
                                     </div>
                                 </div>
                             )}
@@ -1801,31 +1923,15 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 </div>
                             </div>
                         </div>
-                        <div className="p-4 border-t border-slate-100 bg-slate-50">
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setDetailTransaction(null)}
-                                    className="flex-1 py-3 border-2 border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors"
-                                >
-                                    Tutup
-                                </button>
-                                {detailTransaction.type !== TransactionType.RETURN && (
+                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+                            {(currentUser?.role === UserRole.OWNER || currentUser?.role === UserRole.SUPERADMIN) && (
+                                <div className="group relative">
                                     <button
-                                        onClick={() => openReturnTxModal(detailTransaction)}
-                                        className="flex-1 py-3 bg-orange-100 text-orange-700 font-bold rounded-xl hover:bg-orange-200 transition-colors"
+                                        className="text-red-500 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                                        title="Hapus Transaksi"
                                     >
-                                        Retur Transaksi
+                                        <Trash2 size={20} />
                                     </button>
-                                )}
-                                <button
-                                    onClick={() => printTransactionDetail(detailTransaction)}
-                                    className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-colors"
-                                >
-                                    Cetak Struk
-                                </button>
-                            </div>
-                            {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
-                                <div className="mt-4 pt-4 border-t border-slate-200">
                                     <button
                                         onClick={async () => {
                                             if (confirm('PERINGATAN: Menghapus transaksi ini akan membatalkan semua perubahan stok, menghapus riwayat pembayaran, dan menghapus arus kas terkait. Tindakan ini tidak dapat dibatalkan. Lanjutkan?')) {
@@ -1839,12 +1945,26 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                 }
                                             }
                                         }}
-                                        className="w-full py-3 border-2 border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors"
+                                        className="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg z-10 pointer-events-none group-hover:pointer-events-auto"
                                     >
-                                        Hapus Transaksi (Admin)
+                                        Hapus Transaksi (Admin Only)
                                     </button>
                                 </div>
                             )}
+                            <div className="flex justify-end gap-2 ml-auto">
+                                {detailTransaction.type !== TransactionType.RETURN && (
+                                    <button
+                                        onClick={() => openReturnTxModal(detailTransaction)}
+                                        className="bg-orange-50 border border-orange-300 text-orange-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 flex items-center gap-2"
+                                    >
+                                        <RotateCcw size={16} /> Retur
+                                    </button>
+                                )}
+                                <button onClick={() => printTransactionDetail(detailTransaction)} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50">
+                                    <Printer size={16} /> Cetak Detail
+                                </button>
+                                <button onClick={() => setDetailTransaction(null)} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold">Tutup</button>
+                            </div>
                         </div>
                     </div>
                 </div>,
@@ -1877,7 +1997,9 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 </div>
                                 <div>
                                     <span className="text-slate-500 block text-xs">Status</span>
-                                    <span className={`font-bold ${detailPurchase.paymentStatus === 'LUNAS' ? 'text-green-600' : 'text-red-600'}`}>{detailPurchase.paymentStatus}</span>
+                                    <span className={`font-bold ${detailPurchase.paymentStatus === 'LUNAS' ? 'text-green-600' : 'text-red-600'}`}>
+                                        {detailPurchase.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : detailPurchase.paymentStatus}
+                                    </span>
                                 </div>
                             </div>
 
@@ -1891,8 +2013,71 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 <span>{formatIDR(detailPurchase.totalAmount)}</span>
                             </div>
 
+                            {/* Return History (If this is a Purchase) */}
+                            {purchases.filter(p => p.type === 'RETURN' && p.description.includes(detailPurchase.id)).length > 0 && (
+                                <div className="mt-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Retur ke Supplier</h4>
+                                    <div className="bg-orange-50 rounded-lg p-3 space-y-2 text-sm border border-orange-100">
+                                        {purchases
+                                            .filter(p => p.type === 'RETURN' && p.description.includes(detailPurchase.id))
+                                            .map((ret, i) => (
+                                                <div key={i} className="flex justify-between border-b border-orange-200 last:border-0 pb-2">
+                                                    <div>
+                                                        <div className="flex gap-1 text-xs text-slate-500">
+                                                            <span>{new Date(ret.date).toLocaleDateString('id-ID')}</span>
+                                                            <span className="font-mono bg-slate-200 px-1 rounded text-[10px]">{new Date(ret.date).toLocaleTimeString('id-ID')}</span>
+                                                        </div>
+                                                        <span className="text-slate-700 block font-medium">Retur #{ret.id.substring(0, 6)}</span>
+                                                        <div className="text-xs text-slate-500 mt-1 italic">
+                                                            {ret.description}
+                                                        </div>
+                                                    </div>
+                                                    <span className="font-medium text-red-600">{formatIDR(ret.totalAmount)}</span>
+                                                </div>
+                                            ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Original Purchase Info (If this is a Return) */}
+                            {detailPurchase.type === 'RETURN' && (
+                                <div className="mt-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Info Pembelian Induk</h4>
+                                    <div className="bg-blue-50 rounded-lg p-3 text-sm border border-blue-100">
+                                        {(() => {
+                                            // Extract original ID from description if possible, or search by fuzzy match
+                                            // Assuming description format "Retur dari pembelian #ID..."
+                                            const originalIdMatch = detailPurchase.description.match(/#([a-zA-Z0-9-]+)/);
+                                            const originalId = originalIdMatch ? originalIdMatch[1] : null;
+
+                                            const originalTx = originalId ? purchases.find(p => p.id === originalId || p.id.startsWith(originalId)) : null;
+
+                                            if (originalTx) {
+                                                return (
+                                                    <div className="flex justify-between items-center cursor-pointer hover:bg-blue-100 p-2 rounded transition-colors" onClick={() => setDetailPurchase(originalTx)}>
+                                                        <div>
+                                                            <div className="flex gap-1 text-xs text-slate-500">
+                                                                <span>{new Date(originalTx.date).toLocaleDateString('id-ID')}</span>
+                                                            </div>
+                                                            <span className="text-slate-700 font-bold block">#{originalTx.id.substring(0, 8)}</span>
+                                                            <span className="text-xs text-slate-600">Total: {formatIDR(originalTx.totalAmount)}</span>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="text-xs bg-white border border-blue-200 px-2 py-1 rounded text-blue-600 flex items-center gap-1">
+                                                                <Eye size={10} /> Lihat
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            return <span className="text-slate-500 italic">Info pembelian induk tidak ditemukan di deskripsi.</span>;
+                                        })()}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Payment History */}
-                            <h4 className="font-bold text-sm text-slate-800 mb-2">Riwayat Pembayaran</h4>
+                            <h4 className="font-bold text-sm text-slate-800 mb-2 mt-6">Riwayat Pembayaran</h4>
                             <div className="bg-slate-50 rounded-lg p-3 space-y-2 text-sm">
                                 {detailPurchase.paymentHistory?.map((ph, i) => (
                                     <div key={i} className="flex justify-between border-b border-slate-200 last:border-0 pb-1">
@@ -1922,28 +2107,15 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 </div>
                             </div>
                         </div>
-                        <div className="p-4 border-t border-slate-100 bg-slate-50">
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setDetailPurchase(null)}
-                                    className="flex-1 py-3 border-2 border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors"
-                                >
-                                    Tutup
-                                </button>
-                                {detailPurchase.type !== PurchaseType.RETURN && (
+                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+                            {(currentUser?.role === UserRole.OWNER || currentUser?.role === UserRole.SUPERADMIN) && (
+                                <div className="group relative">
                                     <button
-                                        onClick={() => setIsReturnPurchaseModalOpen(true)}
-                                        className="flex-1 py-3 bg-orange-100 text-orange-700 font-bold rounded-xl hover:bg-orange-200 transition-colors"
+                                        className="text-red-500 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                                        title="Hapus Pembelian"
                                     >
-                                        Retur Pembelian
+                                        <Trash2 size={20} />
                                     </button>
-                                )}
-                                <button onClick={() => printPurchaseDetail(detailPurchase)} className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-colors">
-                                    Cetak Detail
-                                </button>
-                            </div>
-                            {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
-                                <div className="mt-4 pt-4 border-t border-slate-200">
                                     <button
                                         onClick={async () => {
                                             if (confirm('PERINGATAN: Menghapus pembelian ini akan membatalkan perubahan stok dan menghapus arus kas terkait. Tindakan ini tidak dapat dibatalkan. Lanjutkan?')) {
@@ -1957,12 +2129,26 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                 }
                                             }
                                         }}
-                                        className="w-full py-3 border-2 border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors"
+                                        className="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg z-10 pointer-events-none group-hover:pointer-events-auto"
                                     >
-                                        Hapus Pembelian (Admin)
+                                        Hapus Pembelian (Admin Only)
                                     </button>
                                 </div>
                             )}
+                            <div className="flex justify-end gap-2 ml-auto">
+                                {detailPurchase.type !== PurchaseType.RETURN && (
+                                    <button
+                                        onClick={() => setIsReturnPurchaseModalOpen(true)}
+                                        className="bg-orange-50 border border-orange-300 text-orange-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 flex items-center gap-2"
+                                    >
+                                        <RotateCcw size={16} /> Retur
+                                    </button>
+                                )}
+                                <button onClick={() => printPurchaseDetail(detailPurchase)} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50">
+                                    <Printer size={16} /> Cetak Detail
+                                </button>
+                                <button onClick={() => setDetailPurchase(null)} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold">Tutup</button>
+                            </div>
                         </div>
                     </div>
                 </div>,
@@ -1972,82 +2158,218 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             {/* PURCHASE MODAL */}
             {isPurchaseModalOpen && createPortal(
                 <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 bg-black/40 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-white rounded-2xl w-full max-w-md shadow-xl p-6">
-                        <h3 className="font-bold text-xl mb-4">Catat Pembelian Stok</h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Supplier</label>
-                                <select
-                                    className="w-full border border-slate-300 p-2 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={purchaseForm.supplierId}
-                                    onChange={e => setPurchaseForm({ ...purchaseForm, supplierId: e.target.value })}
-                                >
-                                    <option value="">-- Pilih Supplier --</option>
-                                    {suppliers.map(s => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Keterangan Barang</label>
-                                <input
-                                    type="text"
-                                    className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    placeholder="Misal: 10 Bal Keripik Singkong"
-                                    value={purchaseForm.description}
-                                    onChange={e => setPurchaseForm({ ...purchaseForm, description: e.target.value })}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Total Belanja (Rp)</label>
-                                <input
-                                    type="text"
-                                    className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={purchaseForm.amount}
-                                    onChange={e => setPurchaseForm({ ...purchaseForm, amount: numericInput(e.target.value) })}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Dibayar (Rp)</label>
-                                <input
-                                    type="text"
-                                    className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    placeholder="0 jika tempo"
-                                    value={purchaseForm.paid}
-                                    onChange={e => setPurchaseForm({ ...purchaseForm, paid: numericInput(e.target.value) })}
-                                />
-                                <p className="text-xs text-slate-500 mt-1">Sisa akan dicatat sebagai utang supplier.</p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Metode Pembayaran</label>
-                                <select
-                                    className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={purchaseForm.paymentMethod}
-                                    onChange={e => setPurchaseForm({ ...purchaseForm, paymentMethod: e.target.value as PaymentMethod, bankId: '' })}
-                                >
-                                    <option value={PaymentMethod.CASH}>Tunai</option>
-                                    <option value={PaymentMethod.TRANSFER}>Transfer</option>
-                                </select>
-                            </div>
-                            {purchaseForm.paymentMethod === PaymentMethod.TRANSFER && (
+                    <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden">
+                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <h3 className="font-bold text-slate-800">Catat Pembelian Stok</h3>
+                            <button onClick={() => setIsPurchaseModalOpen(false)}><X size={20} className="text-slate-400" /></button>
+                        </div>
+                        <div className="p-6 max-h-[70vh] overflow-y-auto">
+                            <div className="space-y-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Rekening Sumber</label>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Supplier</label>
                                     <select
-                                        className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                        value={purchaseForm.bankId}
-                                        onChange={e => setPurchaseForm({ ...purchaseForm, bankId: e.target.value })}
+                                        className="w-full border border-slate-300 p-2 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={purchaseForm.supplierId}
+                                        onChange={e => setPurchaseForm({ ...purchaseForm, supplierId: e.target.value })}
                                     >
-                                        <option value="">-- Pilih Rekening --</option>
-                                        {banks.map(b => (
-                                            <option key={b.id} value={b.id}>{b.bankName}</option>
+                                        <option value="">-- Pilih Supplier --</option>
+                                        {suppliers.map(s => (
+                                            <option key={s.id} value={s.id}>{s.name}</option>
                                         ))}
                                     </select>
                                 </div>
-                            )}
-                            <div className="flex gap-3 pt-4">
-                                <button onClick={() => setIsPurchaseModalOpen(false)} className="flex-1 py-2.5 text-slate-600 hover:bg-slate-50 rounded-lg font-medium">Batal</button>
-                                <button onClick={handlePurchaseSubmit} className="flex-1 py-2.5 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800">Simpan</button>
+
+                                {/* Mode Selection */}
+                                <div className="flex gap-2 p-1 bg-slate-100 rounded-lg">
+                                    <button
+                                        onClick={() => setPurchaseMode('items')}
+                                        className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-all ${purchaseMode === 'items' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                    >
+                                        Pilih Barang
+                                    </button>
+                                    <button
+                                        onClick={() => setPurchaseMode('manual')}
+                                        className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-all ${purchaseMode === 'manual' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                    >
+                                        Input Manual
+                                    </button>
+                                </div>
+
+                                {purchaseMode === 'items' ? (
+                                    <>
+                                        {/* Product Search */}
+                                        <div className="relative">
+                                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                            <input
+                                                type="text"
+                                                placeholder="Cari barang untuk dibeli..."
+                                                className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                                value={purchaseProductSearch}
+                                                onChange={e => setPurchaseProductSearch(e.target.value)}
+                                            />
+                                            {purchaseProductSearch && (
+                                                <div className="absolute z-10 w-full bg-white border border-slate-200 rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
+                                                    {products.filter(p => p.name.toLowerCase().includes(purchaseProductSearch.toLowerCase())).map(p => (
+                                                        <div
+                                                            key={p.id}
+                                                            className="p-2 hover:bg-slate-50 cursor-pointer text-sm flex justify-between"
+                                                            onClick={() => {
+                                                                if (!purchaseItems.find(i => i.id === p.id)) {
+                                                                    setPurchaseItems([...purchaseItems, { id: p.id, qty: 1, price: p.hpp, name: p.name }]);
+                                                                }
+                                                                setPurchaseProductSearch('');
+                                                            }}
+                                                        >
+                                                            <span>{p.name}</span>
+                                                            <div className="text-right">
+                                                                <span className="text-slate-500 text-xs block">Stok: {p.stock}</span>
+                                                                <span className="text-slate-700 font-medium text-xs">HPP: {formatIDR(p.hpp)}</span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Selected Items List */}
+                                        <div className="space-y-3">
+                                            {purchaseItems.map((item, idx) => (
+                                                <div key={item.id} className="p-3 border border-slate-200 rounded-lg">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <div className="font-medium text-slate-800 text-sm">{item.name}</div>
+                                                        <button onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))} className="text-red-500"><X size={16} /></button>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-sm">
+                                                        <div className="flex items-center border border-slate-300 rounded overflow-hidden">
+                                                            <button
+                                                                onClick={() => {
+                                                                    const newItems = [...purchaseItems];
+                                                                    if (newItems[idx].qty > 1) newItems[idx].qty--;
+                                                                    setPurchaseItems(newItems);
+                                                                }}
+                                                                className="px-2 py-1 bg-slate-50 hover:bg-slate-100 border-r border-slate-300"
+                                                            >-</button>
+                                                            <input
+                                                                type="text"
+                                                                className="w-12 text-center outline-none"
+                                                                value={item.qty}
+                                                                onChange={(e) => {
+                                                                    const val = parseInt(e.target.value) || 0;
+                                                                    const newItems = [...purchaseItems];
+                                                                    newItems[idx].qty = val;
+                                                                    setPurchaseItems(newItems);
+                                                                }}
+                                                            />
+                                                            <button
+                                                                onClick={() => {
+                                                                    const newItems = [...purchaseItems];
+                                                                    newItems[idx].qty++;
+                                                                    setPurchaseItems(newItems);
+                                                                }}
+                                                                className="px-2 py-1 bg-slate-50 hover:bg-slate-100 border-l border-slate-300"
+                                                            >+</button>
+                                                        </div>
+                                                        <span className="text-slate-400">x</span>
+                                                        <input
+                                                            type="text"
+                                                            className="flex-1 border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500"
+                                                            placeholder="Harga Beli (HPP)"
+                                                            value={item.price}
+                                                            onChange={(e) => {
+                                                                const val = parseFloat(e.target.value) || 0; // Allow typing
+                                                                const newItems = [...purchaseItems];
+                                                                newItems[idx].price = val;
+                                                                setPurchaseItems(newItems);
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div className="text-right text-xs font-bold text-slate-700 mt-1">
+                                                        Subtotal: {formatIDR(item.qty * item.price)}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {purchaseItems.length === 0 && (
+                                                <div className="text-center text-slate-400 py-4 text-sm bg-slate-50 rounded-lg border border-dashed border-slate-300">
+                                                    Belum ada barang dipilih.
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
+                                            <span className="font-bold text-blue-800">Total Belanja</span>
+                                            <span className="font-bold text-blue-800 text-lg">
+                                                {formatIDR(purchaseItems.reduce((sum, i) => sum + (i.qty * i.price), 0))}
+                                            </span>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Keterangan Barang</label>
+                                            <input
+                                                type="text"
+                                                className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                placeholder="Misal: 10 Bal Keripik Singkong"
+                                                value={purchaseForm.description}
+                                                onChange={e => setPurchaseForm({ ...purchaseForm, description: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Total Belanja (Rp)</label>
+                                            <input
+                                                type="text"
+                                                className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                value={purchaseForm.amount}
+                                                onChange={e => setPurchaseForm({ ...purchaseForm, amount: numericInput(e.target.value) })}
+                                            />
+                                        </div>
+                                    </>
+                                )}
+
+                                <div className="border-t border-slate-200 pt-4 mt-4">
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Dibayar (Rp)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="0 jika tempo"
+                                        value={purchaseForm.paid}
+                                        onChange={e => setPurchaseForm({ ...purchaseForm, paid: numericInput(e.target.value) })}
+                                    />
+                                    <p className="text-xs text-slate-500 mt-1">Sisa akan dicatat sebagai utang supplier.</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Metode Pembayaran</label>
+                                    <select
+                                        className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={purchaseForm.paymentMethod}
+                                        onChange={e => setPurchaseForm({ ...purchaseForm, paymentMethod: e.target.value as PaymentMethod, bankId: '' })}
+                                    >
+                                        <option value={PaymentMethod.CASH}>Tunai</option>
+                                        <option value={PaymentMethod.TRANSFER}>Transfer</option>
+                                    </select>
+                                </div>
+                                {purchaseForm.paymentMethod === PaymentMethod.TRANSFER && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Rekening Sumber</label>
+                                        <select
+                                            className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                            value={purchaseForm.bankId}
+                                            onChange={e => setPurchaseForm({ ...purchaseForm, bankId: e.target.value })}
+                                        >
+                                            <option value="">-- Pilih Rekening --</option>
+                                            {banks.map(b => (
+                                                <option key={b.id} value={b.id}>{b.bankName}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
                             </div>
+                        </div>
+                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
+                            <button onClick={() => setIsPurchaseModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Batal</button>
+                            <button onClick={handlePurchaseSubmit} className="bg-slate-900 text-white px-4 py-2 rounded-lg font-bold hover:bg-slate-800 shadow-lg">
+                                Simpan
+                            </button>
                         </div>
                     </div>
                 </div>,
@@ -2120,80 +2442,152 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                             <button onClick={() => setIsReturnPurchaseModalOpen(false)}><X size={20} className="text-slate-400" /></button>
                         </div>
                         <div className="p-6 max-h-[70vh] overflow-y-auto">
-                            <p className="text-sm text-slate-600 mb-4">Pilih barang dari stok yang ingin dikembalikan ke supplier <b>{detailPurchase?.supplierName}</b>.</p>
+                            <p className="text-sm text-slate-600 mb-4">Proses pengembalian barang atau dana dari supplier <b>{detailPurchase?.supplierName}</b>.</p>
 
-                            {/* Product Search */}
-                            <div className="mb-4 relative">
-                                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Cari barang untuk diretur..."
-                                    className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                                    value={productSearch}
-                                    onChange={e => setProductSearch(e.target.value)}
-                                />
-                                {productSearch && (
-                                    <div className="absolute z-10 w-full bg-white border border-slate-200 rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
-                                        {products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
-                                            <div
-                                                key={p.id}
-                                                className="p-2 hover:bg-slate-50 cursor-pointer text-sm flex justify-between"
-                                                onClick={() => {
-                                                    if (!returnPurchaseItems.find(i => i.id === p.id)) {
-                                                        setReturnPurchaseItems([...returnPurchaseItems, { id: p.id, qty: 1, price: p.hpp, name: p.name }]);
-                                                    }
-                                                    setProductSearch('');
-                                                }}
-                                            >
-                                                <span>{p.name}</span>
-                                                <span className="text-slate-400 text-xs">Stok: {p.stock}</span>
+                            {/* Mode Selection */}
+                            <div className="flex gap-2 p-1 bg-slate-100 rounded-lg mb-6">
+                                <button
+                                    onClick={() => setReturnPurchaseMode('items')}
+                                    className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-all ${returnPurchaseMode === 'items' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                >
+                                    Pilih Barang
+                                </button>
+                                <button
+                                    onClick={() => setReturnPurchaseMode('manual')}
+                                    className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-all ${returnPurchaseMode === 'manual' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                >
+                                    Nominal Manual
+                                </button>
+                            </div>
+
+                            {returnPurchaseMode === 'items' ? (
+                                <>
+                                    {/* Product Search */}
+                                    <div className="mb-4 relative">
+                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                        <input
+                                            type="text"
+                                            placeholder="Cari barang untuk diretur..."
+                                            className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                            value={productSearch}
+                                            onChange={e => setProductSearch(e.target.value)}
+                                        />
+                                        {productSearch && (
+                                            <div className="absolute z-10 w-full bg-white border border-slate-200 rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
+                                                {products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
+                                                    <div
+                                                        key={p.id}
+                                                        className="p-2 hover:bg-slate-50 cursor-pointer text-sm flex justify-between"
+                                                        onClick={() => {
+                                                            if (!returnPurchaseItems.find(i => i.id === p.id)) {
+                                                                setReturnPurchaseItems([...returnPurchaseItems, { id: p.id, qty: 1, price: p.hpp, name: p.name }]);
+                                                            }
+                                                            setProductSearch('');
+                                                        }}
+                                                    >
+                                                        <span>{p.name}</span>
+                                                        <span className="text-slate-400 text-xs">Stok: {p.stock}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        {returnPurchaseItems.map((item, idx) => (
+                                            <div key={item.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg">
+                                                <div className="flex-1">
+                                                    <div className="font-medium text-slate-800">{item.name}</div>
+                                                    <div className="text-xs text-slate-500">Refund/Item: {formatIDR(item.price)}</div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <button
+                                                        onClick={() => {
+                                                            const newItems = [...returnPurchaseItems];
+                                                            if (newItems[idx].qty > 0) newItems[idx].qty--;
+                                                            if (newItems[idx].qty === 0) {
+                                                                setReturnPurchaseItems(newItems.filter((_, i) => i !== idx));
+                                                            } else {
+                                                                setReturnPurchaseItems(newItems);
+                                                            }
+                                                        }}
+                                                        className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full hover:bg-slate-200"
+                                                    >-</button>
+                                                    <span className="w-8 text-center font-bold">{item.qty}</span>
+                                                    <button
+                                                        onClick={() => {
+                                                            const newItems = [...returnPurchaseItems];
+                                                            newItems[idx].qty++;
+                                                            setReturnPurchaseItems(newItems);
+                                                        }}
+                                                        className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full hover:bg-slate-200"
+                                                    >+</button>
+                                                    <button onClick={() => setReturnPurchaseItems(returnPurchaseItems.filter((_, i) => i !== idx))} className="text-red-500 ml-2"><X size={16} /></button>
+                                                </div>
                                             </div>
                                         ))}
+                                        {returnPurchaseItems.length === 0 && (
+                                            <div className="text-center text-slate-400 py-4 text-sm">Belum ada barang dipilih.</div>
+                                        )}
                                     </div>
-                                )}
+                                </>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Nominal Refund (Rp)</label>
+                                        <input
+                                            type="text"
+                                            className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold"
+                                            value={returnPurchaseManualAmount}
+                                            onChange={e => setReturnPurchaseManualAmount(numericInput(e.target.value))}
+                                            placeholder="0"
+                                        />
+                                        <p className="text-xs text-slate-500 mt-1">Masukkan jumlah uang yang dikembalikan oleh supplier.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Payment Method Selection */}
+                            <div className="mt-6 pt-4 border-t border-slate-100">
+                                <label className="block text-sm font-medium text-slate-700 mb-2">Metode Pengembalian Dana</label>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <select
+                                            className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                            value={returnPurchaseMethod}
+                                            onChange={e => {
+                                                setReturnPurchaseMethod(e.target.value as PaymentMethod);
+                                                setReturnPurchaseBankId('');
+                                            }}
+                                        >
+                                            <option value={PaymentMethod.CASH}>Tunai</option>
+                                            <option value={PaymentMethod.TRANSFER}>Transfer</option>
+                                        </select>
+                                    </div>
+                                    {returnPurchaseMethod === PaymentMethod.TRANSFER && (
+                                        <div>
+                                            <select
+                                                className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                                value={returnPurchaseBankId}
+                                                onChange={e => setReturnPurchaseBankId(e.target.value)}
+                                            >
+                                                <option value="">-- Pilih Bank --</option>
+                                                {banks.map(b => (
+                                                    <option key={b.id} value={b.id}>{b.bankName}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
-                            <div className="space-y-3">
-                                {returnPurchaseItems.map((item, idx) => (
-                                    <div key={item.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg">
-                                        <div className="flex-1">
-                                            <div className="font-medium text-slate-800">{item.name}</div>
-                                            <div className="text-xs text-slate-500">Refund/Item: {formatIDR(item.price)}</div>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <button
-                                                onClick={() => {
-                                                    const newItems = [...returnPurchaseItems];
-                                                    if (newItems[idx].qty > 0) newItems[idx].qty--;
-                                                    if (newItems[idx].qty === 0) {
-                                                        setReturnPurchaseItems(newItems.filter((_, i) => i !== idx));
-                                                    } else {
-                                                        setReturnPurchaseItems(newItems);
-                                                    }
-                                                }}
-                                                className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full hover:bg-slate-200"
-                                            >-</button>
-                                            <span className="w-8 text-center font-bold">{item.qty}</span>
-                                            <button
-                                                onClick={() => {
-                                                    const newItems = [...returnPurchaseItems];
-                                                    newItems[idx].qty++;
-                                                    setReturnPurchaseItems(newItems);
-                                                }}
-                                                className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full hover:bg-slate-200"
-                                            >+</button>
-                                            <button onClick={() => setReturnPurchaseItems(returnPurchaseItems.filter((_, i) => i !== idx))} className="text-red-500 ml-2"><X size={16} /></button>
-                                        </div>
-                                    </div>
-                                ))}
-                                {returnPurchaseItems.length === 0 && (
-                                    <div className="text-center text-slate-400 py-4 text-sm">Belum ada barang dipilih.</div>
-                                )}
-                            </div>
                             <div className="mt-6 p-4 bg-green-50 rounded-xl flex justify-between items-center">
                                 <span className="text-green-800 font-medium">Total Refund (Masuk)</span>
                                 <span className="text-green-800 font-bold text-xl">
-                                    {formatIDR(returnPurchaseItems.reduce((sum, i) => sum + (i.qty * i.price), 0))}
+                                    {returnPurchaseMode === 'items'
+                                        ? formatIDR(returnPurchaseItems.reduce((sum, i) => sum + (i.qty * i.price), 0))
+                                        : formatIDR(parseFloat(returnPurchaseManualAmount.replace(/[^0-9]/g, '')) || 0)
+                                    }
                                 </span>
                             </div>
                         </div>
