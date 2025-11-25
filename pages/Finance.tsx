@@ -440,25 +440,50 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             // Purchases don't have cashierId, so cashiers see all purchases
             return items;
         } else if (type === 'cashflow') {
-            // Filter cashflows related to cashier's transactions
+            // Filter cashflows related to cashier's transactions OR all purchases
             const cashierTransactionIds = transactions
                 .filter(t => t.cashierId === currentUser.id)
                 .map(t => t.id);
 
             return items.filter(item => {
                 // 1. Check if explicitly created by this user (New Data)
-                if (item.userId) {
-                    return item.userId === currentUser.id;
+                if (item.userId && item.userId === currentUser.id) {
+                    return true;
                 }
 
-                // 2. Legacy/System generated cashflows linked to transactions (Old Data fallback)
-                if (item.category === 'Pelunasan Piutang') {
-                    return cashierTransactionIds.some(txId =>
+                // 2. Allow all Purchase-related categories (since Cashiers see all purchases)
+                const purchaseCategories = [
+                    'Pembelian', 
+                    'Pembelian Stok', 
+                    'Pelunasan Utang Supplier', 
+                    'Retur Pembelian'
+                ];
+                if (purchaseCategories.includes(item.category)) {
+                    return true;
+                }
+
+                // 3. Check for Transaction-related items (Sales, Returns, Receivables)
+                // Check by Reference ID (Best)
+                if (item.referenceId && cashierTransactionIds.includes(item.referenceId)) {
+                    return true;
+                }
+
+                // 4. Fallback: Check by Description (Legacy/System)
+                // This covers 'Penjualan', 'Pelunasan Piutang', 'Retur Penjualan' if referenceId is missing
+                const transactionCategories = [
+                    'Penjualan',
+                    'Pelunasan Piutang',
+                    'Retur Penjualan'
+                ];
+                
+                if (transactionCategories.includes(item.category)) {
+                     // Check if description contains any of the cashier's transaction IDs
+                     return cashierTransactionIds.some(txId => 
+                        item.description.includes(txId) || 
                         item.description.includes(txId.substring(0, 6))
-                    );
+                     );
                 }
 
-                // 3. Strict Mode: Hide everything else not performed by this user
                 return false;
             });
         }
