@@ -593,7 +593,8 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             bankId: repaymentBankId,
             bankName: selectedBank?.bankName,
             userId: currentUser?.id,
-            userName: currentUser?.name
+            userName: currentUser?.name,
+            referenceId: selectedDebt.id
         });
 
         setSelectedDebt(null);
@@ -654,7 +655,8 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             bankId: payableBankId,
             bankName: selectedBank?.bankName,
             userId: currentUser?.id,
-            userName: currentUser?.name
+            userName: currentUser?.name,
+            referenceId: selectedPayable.id
         });
 
         setSelectedPayable(null);

@@ -136,6 +136,10 @@ const createCrudRoutes = (modelName) => {
 
     router.post('/', authenticateToken, async (req, res) => {
         try {
+            // Hash password for User model
+            if (modelName === 'User' && req.body.password) {
+                req.body.password = await bcrypt.hash(req.body.password, 10);
+            }
             const item = await Model.create(req.body);
             res.json(item);
         } catch (error) {
@@ -146,6 +150,10 @@ const createCrudRoutes = (modelName) => {
 
     router.put('/:id', authenticateToken, async (req, res) => {
         try {
+            // Hash password for User model
+            if (modelName === 'User' && req.body.password) {
+                req.body.password = await bcrypt.hash(req.body.password, 10);
+            }
             const [updated] = await Model.update(req.body, {
                 where: { id: req.params.id }
             });

@@ -85,7 +85,7 @@ export const Settings: React.FC = () => {
     const handleOpenModal = (user?: User) => {
         if (user) {
             setEditingId(user.id);
-            setUserForm({ name: user.name, username: user.username, password: user.password, role: user.role, image: user.image });
+            setUserForm({ name: user.name, username: user.username, password: '', role: user.role, image: user.image });
         } else {
             setEditingId(null);
             setUserForm({ name: '', username: '', password: '', role: UserRole.CASHIER, image: '' });
@@ -94,12 +94,27 @@ export const Settings: React.FC = () => {
     };
 
     const handleSaveUser = async () => {
-        if (!userForm.username || !userForm.password || !userForm.name) return;
+        // Validation: Name and Username are always required
+        if (!userForm.username || !userForm.name) {
+            alert('Nama dan Username wajib diisi');
+            return;
+        }
+
+        // Validation: Password is required ONLY for new users
+        if (!editingId && !userForm.password) {
+            alert('Password wajib diisi untuk user baru');
+            return;
+        }
 
         const payload = {
             ...userForm,
             id: editingId || undefined
         } as User;
+
+        // If editing and password is empty, remove it from payload to keep existing password
+        if (editingId && !userForm.password) {
+            delete (payload as any).password;
+        }
 
         try {
             await StorageService.saveUser(payload);
@@ -739,7 +754,7 @@ export const Settings: React.FC = () => {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                                    <input type="text" className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} />
+                                    <input type="password" className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingId ? "Kosongkan jika tidak ingin mengubah password" : ""} />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Level Akses</label>

@@ -471,17 +471,7 @@ export const ApiService = {
         }
 
         // --- LOGIC D: DELETE RELATED CASHFLOWS ---
-        const cfRes = await fetch(`${API_URL}/cashflow`, { headers: getHeaders() });
-        if (cfRes.ok) {
-            const cashflows = await cfRes.json();
-            const relatedCfs = cashflows.filter((cf: any) => cf.description.includes(id.substring(0, 6)));
-            for (const cf of relatedCfs) {
-                await fetch(`${API_URL}/cashflow/${cf.id}`, {
-                    method: 'DELETE',
-                    headers: getHeaders()
-                });
-            }
-        }
+        // Handled by Backend (Cascading Delete via referenceId)
 
         // --- LOGIC E: DELETE TRANSACTION ---
         const deleteRes = await fetch(`${API_URL}/transactions/${id}`, {
