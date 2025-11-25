@@ -866,7 +866,8 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             headers = ['ID', 'Tanggal', 'Waktu', 'Supplier', 'Keterangan', 'Total', 'Dibayar', 'Status'];
             rows = filteredPurchases.map(p => {
                 const d = new Date(p.date);
-                return [p.id, d.toLocaleDateString('id-ID'), d.toLocaleTimeString('id-ID'), p.supplierName, p.description, p.totalAmount, p.amountPaid, p.paymentStatus]
+                const status = p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus;
+                return [p.id, d.toLocaleDateString('id-ID'), d.toLocaleTimeString('id-ID'), p.supplierName, p.description, p.totalAmount, p.amountPaid, status]
             });
             filename = 'laporan-pembelian.csv';
         } else if (activeTab === 'debt_supplier') {
@@ -934,7 +935,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                   <td>${p.supplierName}</td>
                   <td>${p.description}</td>
                   <td style="text-align:right">${formatIDR(p.totalAmount)}</td>
-                  <td>${p.paymentStatus}</td>
+                  <td>${p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus}</td>
               </tr>
           `).join('');
             content = `<thead><tr><th>ID</th><th>Tanggal & Waktu</th><th>Supplier</th><th>Keterangan</th><th>Total</th><th>Status</th></tr></thead><tbody>${rows}</tbody>`;
@@ -1513,11 +1514,15 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     <td className="p-4 text-slate-600">{p.description}</td>
                                     <td className="p-4 text-slate-800">{formatIDR(p.totalAmount)}</td>
                                     <td className="p-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${p.paymentStatus === 'LUNAS' ? 'bg-green-100 text-green-600' :
-                                            p.paymentStatus === 'SEBAGIAN' ? 'bg-orange-100 text-orange-600' :
-                                                'bg-red-100 text-red-600'
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${p.type === PurchaseType.RETURN
+                                            ? 'bg-purple-100 text-purple-600'
+                                            : p.paymentStatus === 'LUNAS'
+                                                ? 'bg-green-100 text-green-600'
+                                                : p.paymentStatus === 'SEBAGIAN'
+                                                    ? 'bg-orange-100 text-orange-600'
+                                                    : 'bg-red-100 text-red-600'
                                             }`}>
-                                            {p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus}
+                                            {p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus}
                                         </span>
                                     </td>
                                 </tr>

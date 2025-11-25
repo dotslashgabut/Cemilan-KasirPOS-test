@@ -2,10 +2,10 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
-import { Purchase, PaymentStatus, Supplier, UserRole, User, PaymentMethod, StoreSettings } from '../types';
+import { Purchase, PaymentStatus, Supplier, UserRole, User, PaymentMethod, StoreSettings, PurchaseType } from '../types';
 import { formatIDR, formatDate, exportToCSV } from '../utils';
 import { generatePrintPurchaseDetail } from '../utils/printHelpers';
-import { Download, Search, Filter, RotateCcw, X, ArrowUpDown, ArrowUp, ArrowDown, Eye, Printer } from 'lucide-react';
+import { Download, Search, Filter, RotateCcw, X, Eye, Printer } from 'lucide-react';
 
 interface SupplierHistoryProps {
     currentUser: User | null;
@@ -20,7 +20,7 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+
     const [detailPurchase, setDetailPurchase] = useState<Purchase | null>(null);
     const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
 
@@ -31,7 +31,7 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
     // Reset pagination on filter change
     useEffect(() => {
         setVisibleCount(20);
-    }, [selectedSupplierId, startDate, endDate, searchQuery, sortConfig]);
+    }, [selectedSupplierId, startDate, endDate, searchQuery]);
 
     // Load store settings
     useEffect(() => {
@@ -79,29 +79,15 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
         }
 
         // Sort
+        // Sort (Date Descending)
         items.sort((a, b) => {
-            if (sortConfig.key === 'date') {
-                const aTime = new Date(a.date).getTime();
-                const bTime = new Date(b.date).getTime();
-                return sortConfig.direction === 'asc' ? aTime - bTime : bTime - aTime;
-            }
-
-            let aVal = a[sortConfig.key as keyof Purchase];
-            let bVal = b[sortConfig.key as keyof Purchase];
-
-            // Handle string comparison (case-insensitive)
-            if (typeof aVal === 'string' && typeof bVal === 'string') {
-                aVal = aVal.toLowerCase() as any;
-                bVal = bVal.toLowerCase() as any;
-            }
-
-            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-            return 0;
+            const aTime = new Date(a.date).getTime();
+            const bTime = new Date(b.date).getTime();
+            return bTime - aTime;
         });
 
         return items;
-    }, [purchases, selectedSupplierId, startDate, endDate, searchQuery, sortConfig]);
+    }, [purchases, selectedSupplierId, startDate, endDate, searchQuery]);
 
     const visiblePurchases = useMemo(() => filteredPurchases.slice(0, visibleCount), [filteredPurchases, visibleCount]);
 
@@ -138,19 +124,7 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
         return { totalPurchases, totalPaid, totalDebt };
     }, [filteredPurchases]);
 
-    const handleSort = (key: string) => {
-        setSortConfig(current => ({
-            key,
-            direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
-        }));
-    };
 
-    const SortIcon = ({ column }: { column: string }) => {
-        if (sortConfig.key !== column) return <ArrowUpDown size={14} className="ml-1 text-slate-400" />;
-        return sortConfig.direction === 'asc'
-            ? <ArrowUp size={14} className="ml-1 text-blue-600" />
-            : <ArrowDown size={14} className="ml-1 text-blue-600" />;
-    };
 
     const handleExport = () => {
         const headers = ['ID Pembelian', 'Tanggal', 'Supplier', 'Deskripsi', 'Total', 'Dibayar', 'Sisa', 'Status', 'Metode'];
@@ -162,7 +136,7 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
             p.totalAmount,
             p.amountPaid,
             p.totalAmount - p.amountPaid,
-            p.paymentStatus,
+            p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus,
             p.paymentMethod
         ]);
         exportToCSV(`riwayat-supplier-${selectedSupplier?.name || 'all'}.csv`, headers, rows);
@@ -182,7 +156,7 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                 <td style="text-align:right">${formatIDR(p.totalAmount)}</td>
                 <td style="text-align:right">${formatIDR(p.amountPaid)}</td>
                 <td style="text-align:right">${formatIDR(p.totalAmount - p.amountPaid)}</td>
-                <td>${p.paymentStatus}</td>
+                <td>${p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus}</td>
             </tr>
         `).join('');
 
@@ -350,17 +324,11 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b border-slate-100 text-slate-500">
                             <tr>
-                                <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('date')}>
-                                    <div className="flex items-center">Tanggal <SortIcon column="date" /></div>
-                                </th>
+                                <th className="p-4 font-medium">Tanggal</th>
                                 <th className="p-4 font-medium">ID Pembelian</th>
-                                <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('supplierName')}>
-                                    <div className="flex items-center">Supplier <SortIcon column="supplierName" /></div>
-                                </th>
+                                <th className="p-4 font-medium">Supplier</th>
                                 <th className="p-4 font-medium">Deskripsi</th>
-                                <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('totalAmount')}>
-                                    <div className="flex items-center">Total <SortIcon column="totalAmount" /></div>
-                                </th>
+                                <th className="p-4 font-medium">Total</th>
                                 <th className="p-4 font-medium">Dibayar</th>
                                 <th className="p-4 font-medium">Sisa/Utang</th>
                                 <th className="p-4 font-medium">Status</th>
@@ -389,13 +357,15 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                                     <td className="p-4 text-green-600">{formatIDR(p.amountPaid)}</td>
                                     <td className="p-4 text-red-600 font-medium">{formatIDR(p.totalAmount - p.amountPaid)}</td>
                                     <td className="p-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${p.paymentStatus === PaymentStatus.PAID
-                                            ? 'bg-green-100 text-green-600'
-                                            : p.paymentStatus === PaymentStatus.PARTIAL
-                                                ? 'bg-orange-100 text-orange-600'
-                                                : 'bg-red-100 text-red-600'
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${p.type === PurchaseType.RETURN
+                                            ? 'bg-purple-100 text-purple-600'
+                                            : p.paymentStatus === PaymentStatus.PAID
+                                                ? 'bg-green-100 text-green-600'
+                                                : p.paymentStatus === PaymentStatus.PARTIAL
+                                                    ? 'bg-orange-100 text-orange-600'
+                                                    : 'bg-red-100 text-red-600'
                                             }`}>
-                                            {p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus}
+                                            {p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus}
                                         </span>
                                     </td>
                                     <td className="p-4 text-slate-600">{p.paymentMethod}</td>

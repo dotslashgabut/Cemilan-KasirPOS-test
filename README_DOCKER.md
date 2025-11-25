@@ -107,7 +107,60 @@ CMD ["node", "index.js"]
 version: '3.8'
 
 services:
-  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: cemilan-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: cemilankasirpos
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: cemilan-backend
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      DB_HOST: mysql
+      DB_USER: root
+      DB_PASS: ${MYSQL_ROOT_PASSWORD:-root}
+      DB_NAME: cemilankasirpos
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-secret}
+    depends_on:
+      - mysql
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cemilan-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+```
 
 # Lihat logs specific service
 docker-compose logs -f backend

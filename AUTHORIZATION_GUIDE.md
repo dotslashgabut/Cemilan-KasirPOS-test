@@ -259,6 +259,11 @@ SUPERADMIN:
 - Role: SUPERADMIN
 
 OWNER:
+- Username: admin  
+- Password: admin
+- Role: OWNER
+
+CASHIER:
 - Username: owner  
 - Password: owner
 - Role: OWNER

@@ -1,11 +1,8 @@
 # Cemilan KasirPOS Nusantara - Testing
 
-![Static Badge](https://img.shields.io/badge/build-ERROR-red?style=for-the-badge)
+![Static Badge](https://img.shields.io/badge/build-passing-green?style=for-the-badge)
 
-_**Sedang dalam tahap pengembangan**_
-
-**Bug:**
-- Pencatatan pembelian barang otomatis, retur pembelian, produk tidak terpilih otomatis saat pencatatan retur pembelian
+**Bug:** Unknown
 
 **🍬 Cemilan KasirPOS Nusantara - Testing**
 
@@ -18,7 +15,7 @@ _**Sedang dalam tahap pengembangan**_
 - **Backend**: [Node.js (Express)](https://nodejs.org/)
 - **Database**: [MySQL (Sequelize ORM)](https://www.mysql.com/)
 
-Dibuat dengan bantuan [Google AI Studio App](https://aistudio.google.com/apps),[Google Antigravity](https://antigravity.google/), Agent model: Gemini 3 Pro dan Claude Sonnet 4.5
+Dibuat dengan bantuan [Google AI Studio App](https://aistudio.google.com/apps), [Google Antigravity](https://antigravity.google/), Agent model: Gemini 3 Pro dan Claude Sonnet 4.5
 
 Untuk menambahkan Gemini API, buat file `env.local` isi dengan Gemini API anda.
 ```
@@ -220,7 +217,7 @@ The application uses the following tables:
    npm run dev
    ```
 
-10. Open your browser and visit `http://localhost:3000` (or the URL shown in the terminal).
+10. Open your browser and visit `http://localhost:5173` (or the URL shown in the terminal).
 
 See [README_DEVELOPMENT.md](./README_DEVELOPMENT.md) for detailed setup instructions.
 
@@ -431,7 +428,7 @@ Untuk memulai lingkungan pengembangan:
    npm run dev
    ```
 
-Aplikasi akan tersedia di `http://localhost:3000`.
+Aplikasi akan tersedia di `http://localhost:5173`.
 
 ## 🚀 Panduan Deployment
 

@@ -5,7 +5,7 @@ import { StorageService } from '../services/storage';
 import { Transaction, PaymentStatus, Customer, UserRole, User, PaymentMethod, StoreSettings, TransactionType } from '../types';
 import { formatIDR, formatDate, exportToCSV } from '../utils';
 import { generatePrintTransactionDetail } from '../utils/printHelpers';
-import { Download, Search, Filter, RotateCcw, X, ArrowUpDown, ArrowUp, ArrowDown, Eye, FileText, Printer } from 'lucide-react';
+import { Download, Search, Filter, RotateCcw, X, Eye, FileText, Printer } from 'lucide-react';
 
 interface CustomerHistoryProps {
     currentUser: User | null;
@@ -20,7 +20,7 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+
     const [detailTransaction, setDetailTransaction] = useState<Transaction | null>(null);
     const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
 
@@ -31,7 +31,7 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
     // Reset pagination on filter change
     useEffect(() => {
         setVisibleCount(20);
-    }, [selectedCustomerId, startDate, endDate, searchQuery, sortConfig]);
+    }, [selectedCustomerId, startDate, endDate, searchQuery]);
 
     // Load store settings
     useEffect(() => {
@@ -84,29 +84,15 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
         }
 
         // Sort
+        // Sort (Date Descending)
         items.sort((a, b) => {
-            if (sortConfig.key === 'date') {
-                const aTime = new Date(a.date).getTime();
-                const bTime = new Date(b.date).getTime();
-                return sortConfig.direction === 'asc' ? aTime - bTime : bTime - aTime;
-            }
-
-            let aVal = a[sortConfig.key as keyof Transaction];
-            let bVal = b[sortConfig.key as keyof Transaction];
-
-            // Handle string comparison (case-insensitive)
-            if (typeof aVal === 'string' && typeof bVal === 'string') {
-                aVal = aVal.toLowerCase() as any;
-                bVal = bVal.toLowerCase() as any;
-            }
-
-            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-            return 0;
+            const aTime = new Date(a.date).getTime();
+            const bTime = new Date(b.date).getTime();
+            return bTime - aTime;
         });
 
         return items;
-    }, [transactions, selectedCustomerId, startDate, endDate, searchQuery, sortConfig, currentUser]);
+    }, [transactions, selectedCustomerId, startDate, endDate, searchQuery, currentUser]);
 
     const visibleTransactions = useMemo(() => filteredTransactions.slice(0, visibleCount), [filteredTransactions, visibleCount]);
 
@@ -143,19 +129,7 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
         return { totalSales, totalPaid, totalDebt };
     }, [filteredTransactions]);
 
-    const handleSort = (key: string) => {
-        setSortConfig(current => ({
-            key,
-            direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
-        }));
-    };
 
-    const SortIcon = ({ column }: { column: string }) => {
-        if (sortConfig.key !== column) return <ArrowUpDown size={14} className="ml-1 text-slate-400" />;
-        return sortConfig.direction === 'asc'
-            ? <ArrowUp size={14} className="ml-1 text-blue-600" />
-            : <ArrowDown size={14} className="ml-1 text-blue-600" />;
-    };
 
     const handleExport = () => {
         const headers = ['ID Transaksi', 'Tanggal', 'Pelanggan', 'Total', 'Dibayar', 'Sisa', 'Status', 'Metode', 'Kasir'];
@@ -355,16 +329,10 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b border-slate-100 text-slate-500">
                             <tr>
-                                <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('date')}>
-                                    <div className="flex items-center">Tanggal <SortIcon column="date" /></div>
-                                </th>
+                                <th className="p-4 font-medium">Tanggal</th>
                                 <th className="p-4 font-medium">ID Transaksi</th>
-                                <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('customerName')}>
-                                    <div className="flex items-center">Pelanggan <SortIcon column="customerName" /></div>
-                                </th>
-                                <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('totalAmount')}>
-                                    <div className="flex items-center">Total <SortIcon column="totalAmount" /></div>
-                                </th>
+                                <th className="p-4 font-medium">Pelanggan</th>
+                                <th className="p-4 font-medium">Total</th>
                                 <th className="p-4 font-medium">Dibayar</th>
                                 <th className="p-4 font-medium">Piutang</th>
                                 <th className="p-4 font-medium">Kembalian</th>

@@ -38,8 +38,7 @@ Backend terletak di folder `server` dan menggunakan:
    ```
 
 2. **Import Data (Opsional)**:
-   * Untuk data minimal: Import `cemilankasirpos.sql`
-   * Untuk data testing lengkap: Import `cemilankasirpos_big_dummy_data.sql`
+   * Untuk data : Import `cemilankasirpos.sql`
    * **Catatan**: Server akan otomatis membuat tabel jika belum ada (Auto-Sync via Sequelize).
 
 #### B. Instalasi Dependensi Backend
@@ -133,6 +132,7 @@ npm run dev
 ```
 
 Aplikasi akan berjalan di `http://localhost:5173`.
+(atau yang tampil di terminal)
 
 **Verifikasi Frontend**:
 - Buka browser dan akses `http://localhost:5173`
@@ -143,34 +143,35 @@ Aplikasi akan berjalan di `http://localhost:5173`.
 
 ```
 cemilan-kasirpos-test/
-├── src/                          # Frontend (React + TypeScript)
-│   ├── pages/                    # Halaman aplikasi
-│   │   ├── Login.tsx
-│   │   ├── Dashboard.tsx
-│   │   ├── POS.tsx
-│   │   ├── Inventory.tsx
-│   │   └── ...
-│   ├── components/               # Komponen UI reusable
-│   ├── services/                 # API services & business logic
-│   │   └── api.ts               # Axios instance & API calls
-│   ├── db.ts                    # Dexie (IndexedDB) configuration
-│   └── App.tsx                  # Main app component
+├── components/               # Komponen UI reusable
+├── pages/                    # Halaman aplikasi
+│   ├── Login.tsx
+│   ├── Dashboard.tsx
+│   ├── POS.tsx
+│   ├── Inventory.tsx
+│   └── ...
+├── services/                 # API services & business logic
+│   └── api.ts               # Axios instance & API calls
+├── hooks/                    # Custom React hooks
+├── utils/                    # Utility functions
+├── server/                   # Backend (Node.js + Express)
+│   ├── config/               # Konfigurasi
+│   │   └── database.js      # Sequelize connection
+│   ├── models/               # Sequelize models
+│   │   └── index.js         # Model definitions & associations
+│   ├── index.js             # Entry point & route handlers
+│   ├── .env                 # Environment variables (jangan commit!)
+│   └── package.json         # Backend dependencies
 │
-├── server/                       # Backend (Node.js + Express)
-│   ├── config/                   # Konfigurasi
-│   │   └── database.js          # Sequelize connection
-│   ├── models/                   # Sequelize models
-│   │   └── index.js             # Model definitions & associations
-│   ├── index.js                 # Entry point & route handlers
-│   ├── .env                     # Environment variables (jangan commit!)
-│   └── package.json             # Backend dependencies
-│
-├── public/                       # Static assets
-├── .env                         # Frontend environment variables
-├── package.json                 # Frontend dependencies
-├── vite.config.ts               # Vite configuration
-├── tailwind.config.js           # Tailwind CSS configuration
-└── tsconfig.json                # TypeScript configuration
+├── public/                   # Static assets
+├── App.tsx                  # Main app component
+├── index.tsx                # Entry point
+├── types.ts                 # TypeScript type definitions
+├── .env                     # Frontend environment variables
+├── package.json             # Frontend dependencies
+├── vite.config.ts           # Vite configuration
+├── tailwind.config.js       # Tailwind CSS configuration
+└── tsconfig.json            # TypeScript configuration
 ```
 
 ## 🔧 Workflow Pengembangan
@@ -205,16 +206,16 @@ cemilan-kasirpos-test/
 ### Frontend Development
 
 1. **Membuat Halaman Baru**:
-   - Buat file di `src/pages/`
+   - Buat file di `pages/`
    - Tambahkan routing di `App.tsx`
    - Vite HMR akan langsung update browser
 
 2. **Membuat Komponen**:
-   - Buat file di `src/components/`
+   - Buat file di `components/`
    - Import dan gunakan di halaman
 
 3. **API Integration**:
-   - Tambahkan fungsi API di `src/services/api.ts`
+   - Tambahkan fungsi API di `services/api.ts`
    - Gunakan `async/await` untuk API calls
    - Handle error dengan try-catch
 

@@ -70,7 +70,7 @@ Sebelum menjalankan perintah build, pastikan konfigurasi aplikasi sudah benar.
    *   **Jika Backend di Subdomain:** Gunakan URL lengkap seperti contoh di atas.
    *   **Jika Backend di Path yang Sama:** Gunakan path relatif seperti `/api`.
 
-### B. Cek URL API (`src/services/api.ts`)
+### B. Cek URL API (`services/api.ts`)
 
 Pastikan konfigurasi API menggunakan environment variable dengan benar:
 
