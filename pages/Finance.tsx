@@ -453,9 +453,9 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
                 // 2. Allow all Purchase-related categories (since Cashiers see all purchases)
                 const purchaseCategories = [
-                    'Pembelian', 
-                    'Pembelian Stok', 
-                    'Pelunasan Utang Supplier', 
+                    'Pembelian',
+                    'Pembelian Stok',
+                    'Pelunasan Utang Supplier',
                     'Retur Pembelian'
                 ];
                 if (purchaseCategories.includes(item.category)) {
@@ -475,13 +475,13 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                     'Pelunasan Piutang',
                     'Retur Penjualan'
                 ];
-                
+
                 if (transactionCategories.includes(item.category)) {
-                     // Check if description contains any of the cashier's transaction IDs
-                     return cashierTransactionIds.some(txId => 
-                        item.description.includes(txId) || 
+                    // Check if description contains any of the cashier's transaction IDs
+                    return cashierTransactionIds.some(txId =>
+                        item.description.includes(txId) ||
                         item.description.includes(txId.substring(0, 6))
-                     );
+                    );
                 }
 
                 return false;
@@ -1471,7 +1471,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                             onChange={e => setRepaymentBankId(e.target.value)}
                                         >
                                             <option value="">-- Pilih --</option>
-                                            {banks.map(b => (
+                                            {banks.sort((a, b) => a.bankName.localeCompare(b.bankName)).map(b => (
                                                 <option key={b.id} value={b.id}>{b.bankName} - {b.accountNumber}</option>
                                             ))}
                                         </select>
@@ -1671,7 +1671,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                             onChange={e => setPayableBankId(e.target.value)}
                                         >
                                             <option value="">-- Pilih --</option>
-                                            {banks.map(b => (
+                                            {banks.sort((a, b) => a.bankName.localeCompare(b.bankName)).map(b => (
                                                 <option key={b.id} value={b.id}>{b.bankName} - {b.accountNumber}</option>
                                             ))}
                                         </select>
@@ -1830,7 +1830,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                         onChange={e => setCfBankId(e.target.value)}
                                     >
                                         <option value="">-- Bank --</option>
-                                        {banks.map(b => (
+                                        {banks.sort((a, b) => a.bankName.localeCompare(b.bankName)).map(b => (
                                             <option key={b.id} value={b.id}>{b.bankName} - {b.accountNumber}</option>
                                         ))}
                                     </select>
@@ -2254,7 +2254,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                         onChange={e => setPurchaseForm({ ...purchaseForm, supplierId: e.target.value })}
                                     >
                                         <option value="">-- Pilih Supplier --</option>
-                                        {suppliers.map(s => (
+                                        {suppliers.sort((a, b) => a.name.localeCompare(b.name)).map(s => (
                                             <option key={s.id} value={s.id}>{s.name}</option>
                                         ))}
                                     </select>
@@ -2438,7 +2438,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                             onChange={e => setPurchaseForm({ ...purchaseForm, bankId: e.target.value })}
                                         >
                                             <option value="">-- Pilih Rekening --</option>
-                                            {banks.map(b => (
+                                            {banks.sort((a, b) => a.bankName.localeCompare(b.bankName)).map(b => (
                                                 <option key={b.id} value={b.id}>{b.bankName} - {b.accountNumber}</option>
                                             ))}
                                         </select>
@@ -2615,7 +2615,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                 onChange={e => setReturnPurchaseBankId(e.target.value)}
                                             >
                                                 <option value="">-- Pilih Bank --</option>
-                                                {banks.map(b => (
+                                                {banks.sort((a, b) => a.bankName.localeCompare(b.bankName)).map(b => (
                                                     <option key={b.id} value={b.id}>{b.bankName} - {b.accountNumber}</option>
                                                 ))}
                                             </select>

@@ -261,7 +261,7 @@ export const SupplierHistory: React.FC<SupplierHistoryProps> = ({ currentUser })
                         onChange={e => setSelectedSupplierId(e.target.value)}
                     >
                         <option value="">-- Semua Supplier --</option>
-                        {suppliers.map(s => (
+                        {suppliers.sort((a, b) => a.name.localeCompare(b.name)).map(s => (
                             <option key={s.id} value={s.id}>{s.name}</option>
                         ))}
                     </select>

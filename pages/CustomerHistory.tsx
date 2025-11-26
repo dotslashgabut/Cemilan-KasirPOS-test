@@ -266,7 +266,7 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                         onChange={e => setSelectedCustomerId(e.target.value)}
                     >
                         <option value="">-- Semua Pelanggan --</option>
-                        {customers.map(c => (
+                        {customers.sort((a, b) => a.name.localeCompare(b.name)).map(c => (
                             <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                     </select>

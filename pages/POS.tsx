@@ -310,6 +310,7 @@ export const POS: React.FC = () => {
                 <option value="">Pelanggan Umum (Walk-in)</option>
                 {customers
                   .filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()))
+                  .sort((a, b) => a.name.localeCompare(b.name))
                   .map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
@@ -444,7 +445,7 @@ export const POS: React.FC = () => {
                     onChange={e => setSelectedBankId(e.target.value)}
                   >
                     <option value="">-- Pilih Bank / E-Wallet --</option>
-                    {banks.map(b => (
+                    {banks.sort((a, b) => a.bankName.localeCompare(b.bankName)).map(b => (
                       <option key={b.id} value={b.id}>{b.bankName} - {b.accountNumber}</option>
                     ))}
                   </select>
