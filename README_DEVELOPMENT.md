@@ -1,6 +1,6 @@
 # Panduan Pengembangan (Development Guide)
 
-Dokumen ini berisi panduan untuk setup lingkungan pengembangan (development environment) untuk aplikasi Cemilan KasirPOS menggunakan **Backend Node.js (Express + Sequelize)**.
+Dokumen ini berisi panduan untuk setup lingkungan pengembangan (development environment) untuk aplikasi Cemilan KasirPOS. Aplikasi ini menggunakan backend **Node.js**.
 
 ## 📋 Prasyarat (Prerequisites)
 
@@ -18,83 +18,46 @@ Pastikan Anda telah menginstal perangkat lunak berikut di komputer Anda:
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/dotslashgabut/cemilan-kasirpos-test.git
-cd cemilan-kasirpos-test
+git clone https://github.com/dotslashgabut/cemilan-kasirpos.git
+cd cemilan-kasirpos
 ```
 
-### 2. Setup Backend (Node.js & MySQL)
+### 2. Setup Backend (Node.js)
 
-Backend terletak di folder `server` dan menggunakan:
-- **Express.js** - Web framework
-- **Sequelize** - ORM untuk MySQL
-- **JWT** - Autentikasi
-- **bcryptjs** - Password hashing
+Backend terletak di folder `server`.
 
-#### A. Setup Database
+1.  **Masuk ke folder server**:
+    ```bash
+    cd server
+    ```
 
-1. **Buat Database**:
-   ```sql
-   CREATE DATABASE cemilankasirpos CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   ```
+2.  **Install Dependencies**:
+    ```bash
+    npm install
+    ```
 
-2. **Import Data (Opsional)**:
-   * Untuk data : Import `cemilankasirpos.sql`
-   * **Catatan**: Server akan otomatis membuat tabel jika belum ada (Auto-Sync via Sequelize).
+3.  **Setup Database**:
+    *   Buat database baru di MySQL bernama `cemilankasirpos`.
+    *   (Opsional) Import file `cemilankasirpos_php.sql` jika ingin data awal, tapi Sequelize akan membuat tabel otomatis.
 
-#### B. Instalasi Dependensi Backend
+4.  **Konfigurasi Environment**:
+    *   Buat file `.env` di dalam folder `server`.
+    *   Isi dengan konfigurasi berikut:
+        ```env
+        DB_NAME=cemilankasirpos
+        DB_USER=root
+        DB_PASS=
+        DB_HOST=localhost
+        PORT=3001
+        JWT_SECRET=development_secret_key
+        NODE_ENV=development
+        ```
 
-```bash
-cd server
-npm install
-```
-
-Dependensi yang akan terinstall:
-- `express` - Web framework
-- `sequelize` & `mysql2` - Database ORM
-- `jsonwebtoken` - JWT authentication
-- `bcryptjs` - Password encryption
-- `cors` - Cross-Origin Resource Sharing
-- `helmet` - Security headers
-- `express-rate-limit` - Rate limiting
-- `dotenv` - Environment variables
-
-#### C. Konfigurasi Environment
-
-Buat file `.env` di dalam folder `server` dengan isi:
-
-```env
-# Database Configuration
-DB_NAME=cemilankasirpos
-DB_USER=root
-DB_PASS=
-DB_HOST=localhost
-
-# Server Configuration
-PORT=3001
-PORT=3001
-NODE_ENV=development
-# Set ke 'production' untuk menyembunyikan detail error (stack traces)
-
-# Security
-JWT_SECRET=rahasia_development_123_ganti_di_production
-```
-
-**Catatan Penting**:
-- Sesuaikan `DB_USER` dan `DB_PASS` dengan konfigurasi MySQL Anda
-- Kosongkan `DB_PASS` jika menggunakan default XAMPP/Laragon
-- `JWT_SECRET` harus diganti dengan string random yang kuat di production
-
-#### D. Jalankan Server
-
-```bash
-npm start
-```
-
-Server akan berjalan di `http://localhost:3001`.
-
-**Verifikasi Backend**:
-- Buka browser dan akses `http://localhost:3001/api/health` (jika ada health check endpoint)
-- Atau cek terminal untuk pesan "Server running on port 3001"
+5.  **Jalankan Server**:
+    ```bash
+    npm start
+    ```
+    *   Backend akan berjalan di `http://localhost:3001`.
 
 ### 3. Setup Frontend (React + Vite)
 
@@ -105,7 +68,7 @@ Buka terminal baru (biarkan terminal backend tetap berjalan).
 ```bash
 # Kembali ke root project
 cd ..
-# atau jika dari terminal baru: cd cemilan-kasirpos-test
+# atau jika dari terminal baru: cd cemilan-kasirpos
 
 npm install
 ```
@@ -117,7 +80,6 @@ Frontend menggunakan:
 - **Tailwind CSS** - Styling
 - **Lucide React** - Icons
 - **Recharts** - Charts & graphs
-- **Dexie** - IndexedDB wrapper
 
 #### B. Konfigurasi Environment
 
@@ -134,17 +96,16 @@ npm run dev
 ```
 
 Aplikasi akan berjalan di `http://localhost:5173`.
-(atau yang tampil di terminal)
 
 **Verifikasi Frontend**:
 - Buka browser dan akses `http://localhost:5173`
 - Halaman login seharusnya muncul
-- Coba login dengan kredensial default (jika ada di database)
+- Coba login dengan kredensial default: `superadmin` / `password`
 
 ## 📁 Struktur Project
 
 ```
-cemilan-kasirpos-test/
+cemilan-kasirpos/
 ├── components/               # Komponen UI reusable
 ├── pages/                    # Halaman aplikasi
 │   ├── Login.tsx
@@ -156,14 +117,12 @@ cemilan-kasirpos-test/
 │   └── api.ts               # Axios instance & API calls
 ├── hooks/                    # Custom React hooks
 ├── utils/                    # Utility functions
-├── server/                   # Backend (Node.js + Express)
-│   ├── config/               # Konfigurasi
-│   │   └── database.js      # Sequelize connection
-│   ├── models/               # Sequelize models
-│   │   └── index.js         # Model definitions & associations
-│   ├── index.js             # Entry point & route handlers
-│   ├── .env                 # Environment variables (jangan commit!)
-│   └── package.json         # Backend dependencies
+├── server/                   # Backend Node.js/Express API files
+│   ├── config/              # Database config
+│   ├── controllers/         # Request handlers
+│   ├── models/              # Sequelize models
+│   ├── routes/              # API routes
+│   └── index.js             # Entry point
 │
 ├── public/                   # Static assets
 ├── App.tsx                  # Main app component
@@ -180,30 +139,14 @@ cemilan-kasirpos-test/
 
 ### Backend Development
 
-1. **Membuat Model Baru**:
-   - Tambahkan definisi model di `server/models/index.js`
-   - Sequelize akan otomatis membuat tabel saat server restart (jika `sync()` aktif)
+1. **Membuat Endpoint Baru**:
+   - Definisikan route di `server/routes/`
+   - Buat controller di `server/controllers/`
+   - Test dengan Postman/Curl
 
-2. **Menambah API Endpoint**:
-   - Edit `server/index.js`
-   - Tambahkan route handler baru
-   - Restart server untuk melihat perubahan
-
-3. **Testing API**:
-   - Gunakan Postman, Thunder Client, atau curl
-   - Contoh: `curl http://localhost:3001/api/products`
-
-4. **Hot Reload** (Opsional):
-   ```bash
-   # Install nodemon sebagai dev dependency
-   npm install --save-dev nodemon
-   
-   # Edit package.json, tambahkan script:
-   "dev": "nodemon index.js"
-   
-   # Jalankan dengan:
-   npm run dev
-   ```
+2. **Database Changes**:
+   - Edit model di `server/models/`
+   - Sequelize `sync({ alter: true })` akan otomatis update skema saat server restart (di mode development).
 
 ### Frontend Development
 
@@ -221,28 +164,11 @@ cemilan-kasirpos-test/
    - Gunakan `async/await` untuk API calls
    - Handle error dengan try-catch
 
-4. **Styling**:
-   - Gunakan Tailwind CSS classes
-   - Custom styles di file `.css` jika diperlukan
-
 ### Database Management
 
 1. **Melihat Data**:
-   - Gunakan phpMyAdmin (XAMPP/Laragon)
-   - Atau MySQL Workbench
-   - Atau command line: `mysql -u root -p`
-
-2. **Reset Database**:
-   ```sql
-   DROP DATABASE cemilankasirpos;
-   CREATE DATABASE cemilankasirpos;
-   -- Import ulang file .sql
-   ```
-
-3. **Backup Database**:
-   ```bash
-   mysqldump -u root -p cemilankasirpos > backup.sql
-   ```
+   - Gunakan phpMyAdmin, DBeaver, atau MySQL Workbench.
+   - Connect ke database `cemilankasirpos`.
 
 ## 🐛 Troubleshooting
 
@@ -250,36 +176,18 @@ cemilan-kasirpos-test/
 
 **❌ Database Connection Error**
 ```
-Error: connect ECONNREFUSED 127.0.0.1:3306
+SequelizeConnectionError: Access denied for user 'root'@'localhost'
 ```
 **Solusi**:
-- Pastikan MySQL service berjalan
 - Cek kredensial di `server/.env`
-- Verifikasi database sudah dibuat
-- Test koneksi: `mysql -u root -p`
+- Pastikan MySQL service berjalan
 
 **❌ Port Already in Use**
 ```
 Error: listen EADDRINUSE: address already in use :::3001
 ```
 **Solusi**:
-- Cari proses yang menggunakan port: `netstat -ano | findstr :3001` (Windows)
-- Kill proses tersebut atau ubah `PORT` di `.env`
-
-**❌ JWT Secret Error**
-```
-Error: secretOrPrivateKey must have a value
-```
-**Solusi**:
-- Pastikan `JWT_SECRET` ada di `server/.env`
-
-**❌ CORS Error**
-```
-Access to fetch at 'http://localhost:3001/api/...' has been blocked by CORS policy
-```
-**Solusi**:
-- Cek konfigurasi CORS di `server/index.js`
-- Pastikan `http://localhost:5173` ada di `corsOptions.origin`
+- Kill proses yang menggunakan port 3001 atau ubah `PORT` di `.env`.
 
 ### Frontend Issues
 
@@ -288,36 +196,12 @@ Access to fetch at 'http://localhost:3001/api/...' has been blocked by CORS poli
 Error: Network Error
 ```
 **Solusi**:
-- Pastikan `VITE_API_URL` ada di `.env`
-- Restart dev server setelah edit `.env`
-
-**❌ Module Not Found**
-```
-Error: Cannot find module 'lucide-react'
-```
-**Solusi**:
-- Jalankan `npm install` di root project
-- Hapus `node_modules` dan `package-lock.json`, lalu `npm install` lagi
-
-**❌ Port 5173 Already in Use**
-**Solusi**:
-- Vite akan otomatis menggunakan port lain (5174, 5175, dst)
-- Atau kill proses yang menggunakan port 5173
-
-### General Issues
-
-**❌ Changes Not Reflecting**
-- **Backend**: Restart server (atau gunakan nodemon)
-- **Frontend**: Vite HMR biasanya otomatis, coba hard refresh (Ctrl+Shift+R)
-- **Environment Variables**: Restart server/dev setelah edit `.env`
-
-**❌ Permission Denied (Linux/Mac)**
-```bash
-sudo chown -R $USER:$USER .
-```
+- Pastikan `VITE_API_URL` ada di `.env` dan mengarah ke `http://localhost:3001/api`.
+- Restart dev server setelah edit `.env`.
 
 ## 📚 Resources & Documentation
 
+- [Node.js Documentation](https://nodejs.org/en/docs/)
 - [Express.js Documentation](https://expressjs.com/)
 - [Sequelize Documentation](https://sequelize.org/)
 - [React Documentation](https://react.dev/)
@@ -326,9 +210,8 @@ sudo chown -R $USER:$USER .
 
 ## 🔐 Default Credentials (Development)
 
-Jika menggunakan file SQL dengan dummy data:
-- **Admin**: username/password sesuai data di database
-- **Kasir**: username/password sesuai data di database
+- **Username**: `superadmin`
+- **Password**: `password`
 
 > **Penting**: Ganti semua password default sebelum deployment ke production!
 
@@ -340,28 +223,3 @@ Aplikasi ini memiliki fitur keamanan yang bergantung pada environment variable `
 *   **Production (`NODE_ENV=production`)**: Error detail akan disembunyikan dan diganti dengan pesan generik untuk keamanan.
 
 > Pastikan Anda membaca **[SECURITY_AUDIT.md](./SECURITY_AUDIT.md)** untuk memahami audit keamanan dan praktik terbaik sebelum melakukan deployment.
-
-## 📝 Git Workflow
-
-```bash
-# Buat branch baru untuk fitur
-git checkout -b feature/nama-fitur
-
-# Commit perubahan
-git add .
-git commit -m "feat: deskripsi perubahan"
-
-# Push ke remote
-git push origin feature/nama-fitur
-
-# Buat Pull Request di GitHub
-```
-
-## 🎯 Next Steps
-
-Setelah development environment berjalan:
-1. Pelajari struktur kode yang ada
-2. Coba fitur-fitur yang sudah ada
-3. Baca dokumentasi API di `server/index.js`
-4. Mulai develop fitur baru atau fix bugs
-5. Lihat `README_PRODUCTION.md` untuk panduan deployment

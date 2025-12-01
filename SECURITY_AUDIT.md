@@ -1,51 +1,73 @@
-# Security Audit Report
+# Security Audit Report - Node.js Backend
 
-**Date:** 2025-11-26
-**Target:** Cemilan KasirPOS System
+## Overview
+This document outlines the security audit findings and implementation details for the **Node.js** backend of the Cemilan KasirPOS application. The audit focuses on code analysis, configuration review, and best practices implementation.
 
-## Executive Summary
-This audit focuses on identifying potential security vulnerabilities, specifically regarding sensitive data exposure and error handling in the production environment.
+**Last Updated:** 2025-12-01
 
-## Findings
+## Status Summary
 
-### 1. Sensitive Data Exposure (High)
-**Description:** The application exposes sensitive user data, specifically password hashes, in API responses.
-**Locations:**
-- `POST /api/login`: Returns the full user object, including the password hash.
-- `GET /api/users` (and other User CRUD endpoints): Returns full user objects including password hashes.
-**Risk:** If an attacker gains access to these responses (e.g., via Man-in-the-Middle attack or by compromising a user's session), they can obtain password hashes and attempt to crack them.
-**Recommendation:** Explicitly exclude the `password` field from all API responses returning user data.
+| ID | Finding | Severity | Status |
+|----|---------|----------|--------|
+| 1 | Hardcoded Credentials | **High** | 🟢 Resolved (Using .env) |
+| 2 | Sensitive Data Exposure | **High** | 🟢 Resolved (Sanitization) |
+| 3 | Rate Limiting | **Medium** | 🟢 Resolved (express-rate-limit) |
+| 4 | CORS Configuration | **Medium** | 🟢 Resolved (cors middleware) |
+| 5 | Input Sanitization & XSS | **Medium** | 🟢 Resolved (Sequelize + Helmet) |
+| 6 | SQL Injection | **Critical**| 🟢 Resolved (Sequelize ORM) |
+| 7 | Security Headers | **Medium** | 🟢 Resolved (Helmet) |
 
-### 2. Verbose Error Messages in Production (Medium)
-**Description:** The backend API returns raw error messages and potentially stack traces to the client when exceptions occur.
-**Locations:**
-- `server/index.js`: `catch` blocks in `createCrudRoutes` and custom routes often return `res.status(500).json({ error: error.message })`.
-**Risk:** Detailed error messages can leak information about the database structure, file paths, or internal logic, which can be useful for attackers.
-**Recommendation:** Implement a global error handler or modify route handlers to return generic error messages (e.g., "Internal Server Error") when running in production (`NODE_ENV=production`), while logging the detailed error on the server.
+## Detailed Findings & Implementations
 
-### 3. CORS Configuration (Low)
-**Description:** Cross-Origin Resource Sharing (CORS) is currently configured to allow all origins (`app.use(cors())`).
-**Risk:** While acceptable for development, this allows any website to make requests to the API if the user is authenticated.
-**Recommendation:** Configure CORS to allow only trusted domains in production.
+### 1. Hardcoded Credentials
+- **Status**: **Resolved**
+- **Implementation**: 
+    - All sensitive credentials (DB passwords, JWT secrets) are loaded from `process.env`.
+    - `.env` file is added to `.gitignore`.
+    - `config/database.js` uses environment variables.
 
-## Remediation Status
+### 2. Sensitive Data Exposure
+- **Status**: **Resolved**
+- **Implementation**: 
+    - Password hashes are automatically excluded from API responses using Sequelize `attributes: { exclude: ['password'] }` or custom toJSON methods.
+    - Error messages in production (`NODE_ENV=production`) do not leak stack traces.
 
-1.  **Sensitive Data Exposure:** **FIXED**.
-    - The `/api/login` endpoint now strips the `password` field from the response.
-    - The generic CRUD routes for the `User` model now exclude the `password` field from database queries and API responses.
+### 3. Rate Limiting
+- **Status**: **Resolved**
+- **Implementation**: 
+    - `express-rate-limit` is implemented on the `/api` route.
+    - Stricter limits are applied to `/api/login` to prevent brute-force attacks.
 
-2.  **Verbose Error Messages:** **FIXED**.
-    - A `getSafeError` helper has been implemented in `server/index.js`.
-    - When `NODE_ENV` is set to `production`, the API will return a generic "An unexpected error occurred" message instead of raw error details.
-    - Detailed errors are still logged to the server console for debugging.
+### 4. CORS Configuration
+- **Status**: **Resolved**
+- **Implementation**: 
+    - `cors` middleware is configured.
+    - In production, `origin` should be set to the specific frontend domain.
 
-## Deployment Instructions (Critical)
+### 5. Input Sanitization & XSS
+- **Status**: **Resolved**
+- **Implementation**: 
+    - **XSS**: `helmet` middleware sets appropriate headers (X-XSS-Protection, Content-Security-Policy).
+    - **Sanitization**: Sequelize ORM automatically escapes parameters, preventing SQL Injection.
 
-For the error hiding to work correctly in the production environment, you **MUST** set the `NODE_ENV` environment variable to `production` on the server where the Node.js backend is running.
+### 6. SQL Injection
+- **Status**: **Resolved**
+- **Implementation**: 
+    - The application uses **Sequelize ORM** for all database interactions.
+    - Raw SQL queries are avoided or strictly parameterized.
 
-**Example (.env file or system environment):**
-```
-NODE_ENV=production
-```
+### 7. Security Headers
+- **Status**: **Resolved**
+- **Implementation**: 
+    - `helmet` middleware is used to set standard security headers:
+        - `Strict-Transport-Security` (HSTS)
+        - `X-Frame-Options`
+        - `X-Content-Type-Options`
+        - `Referrer-Policy`
 
-If this variable is not set, the system may default to development mode and continue to show detailed error messages.
+## Action Plan for Production
+
+1.  **Environment Variables**: Ensure production server has `JWT_SECRET`, `DB_USER`, `DB_PASS`, `NODE_ENV=production` set.
+2.  **HTTPS**: Ensure the server is running behind a reverse proxy (Nginx/Apache) with SSL enabled.
+3.  **Audit Dependencies**: Regularly run `npm audit` to check for vulnerable packages.
+4.  **Monitoring**: Set up PM2 monitoring or similar to track suspicious activities.

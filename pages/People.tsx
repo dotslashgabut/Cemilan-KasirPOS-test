@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
 import { Customer, Supplier, PriceType } from '../types';
-import { Plus, Edit2, Trash2, Phone, MapPin, Search, User, Truck, Download, Printer, Upload, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, Phone, MapPin, Search, User, Truck, Download, Printer, Upload, X, FileSpreadsheet, Users } from 'lucide-react';
 import { exportToCSV } from '../utils';
+import * as XLSX from 'xlsx';
 
 export const People: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>('customers');
@@ -99,6 +100,36 @@ export const People: React.FC = () => {
         exportToCSV(filename, headers, rows);
     };
 
+    const handleExportExcel = () => {
+        const data = activeTab === 'customers' ? customers : suppliers;
+        const sheetName = activeTab === 'customers' ? 'Data Pelanggan' : 'Data Supplier';
+        const fileNamePrefix = activeTab === 'customers' ? 'Data_Pelanggan' : 'Data_Supplier';
+
+        const exportData = data.map(d => ({
+            'ID': d.id,
+            'Nama': d.name,
+            'Telepon': d.phone,
+            'Alamat': d.address || '',
+            ...(activeTab === 'customers' ? { 'Harga Default': (d as Customer).defaultPriceType || 'ECERAN' } : {})
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(exportData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+
+        // Auto-width
+        const max_width = exportData.reduce((w, r) => Math.max(w, r['Nama'].length), 10);
+        worksheet['!cols'] = [
+            { wch: 15 }, // ID
+            { wch: 30 }, // Nama
+            { wch: 15 }, // Telepon
+            { wch: 40 }, // Alamat
+            ...(activeTab === 'customers' ? [{ wch: 15 }] : []) // Harga Default
+        ];
+
+        XLSX.writeFile(workbook, `${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
     const handlePrint = () => {
         const data = activeTab === 'customers' ? customers : suppliers;
         const title = activeTab === 'customers' ? 'Laporan Data Pelanggan' : 'Laporan Data Supplier';
@@ -182,10 +213,13 @@ export const People: React.FC = () => {
     }, [loadMoreRef.current, filteredList]);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-fade-in">
             <div>
-                <h2 className="text-2xl font-bold text-slate-900">Daftar Kontak</h2>
-                <p className="text-slate-500">Kelola data pelanggan dan supplier.</p>
+                <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                    <Users className="text-blue-600" />
+                    Daftar Kontak
+                </h2>
+                <p className="text-slate-500 mt-1">Kelola data pelanggan dan supplier.</p>
             </div>
 
             <div className="flex flex-col md:flex-row justify-between gap-4">
@@ -215,8 +249,11 @@ export const People: React.FC = () => {
                             onChange={e => setSearch(e.target.value)}
                         />
                     </div>
+                    <button onClick={handleExportExcel} className="bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded-xl flex items-center gap-2 hover:bg-green-100">
+                        <FileSpreadsheet size={18} /> <span className="hidden md:inline">Excel</span>
+                    </button>
                     <button onClick={handleExport} className="bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-xl flex items-center gap-2 hover:bg-slate-50">
-                        <Download size={18} /> <span className="hidden md:inline">Export</span>
+                        <Download size={18} /> <span className="hidden md:inline">CSV</span>
                     </button>
                     <button onClick={handlePrint} className="bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-xl flex items-center gap-2 hover:bg-slate-50">
                         <Printer size={18} /> <span className="hidden md:inline">Print</span>
@@ -334,7 +371,7 @@ export const People: React.FC = () => {
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Alamat</label>
                                 <textarea
                                     className="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    rows={3}
+                                    rows={2}
                                     value={formData.address}
                                     onChange={e => setFormData({ ...formData, address: e.target.value })}
                                 />

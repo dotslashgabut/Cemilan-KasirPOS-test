@@ -3,7 +3,8 @@ import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
 import { TransactionType, UserRole, User } from '../types';
 import { formatIDR, exportToCSV } from '../utils';
-import { Download, Search, Filter, RotateCcw, X, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Download, Search, Filter, RotateCcw, X, ArrowUpDown, ArrowUp, ArrowDown, FileSpreadsheet, ShoppingBag, Printer } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface SoldItemsProps {
     currentUser: User | null;
@@ -152,7 +153,7 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
         const rows = soldItems.map((i, idx) => `
             <tr>
                 <td>${idx + 1}</td>
-                <td>${new Date(i.date).toLocaleDateString('id-ID')} ${new Date(i.date).toLocaleTimeString('id-ID')}</td>
+                <td>${new Date(i.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })} ${new Date(i.date).toLocaleTimeString('id-ID')}</td>
                 <td>${i.transactionId.substring(0, 6)}</td>
                 <td>${i.name}</td>
                 <td>${i.qty}</td>
@@ -185,7 +186,7 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
                         <thead>
                             <tr>
                                 <th style="width: 40px;">No</th>
-                                <th>Waktu</th>
+                                <th>Tanggal</th>
                                 <th>ID Transaksi</th>
                                 <th>Item</th>
                                 <th>Qty</th>
@@ -246,17 +247,70 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
         exportToCSV('laporan-barang-terjual.csv', headers, rows);
     };
 
+    const handleExportExcel = () => {
+        const showHPP = currentUser?.role !== UserRole.CASHIER;
+        const data = soldItems.map(i => {
+            const d = new Date(i.date);
+            const item: any = {
+                'ID Transaksi': i.transactionId,
+                'Tanggal': d.toLocaleDateString('id-ID'),
+                'Waktu': d.toLocaleTimeString('id-ID'),
+                'Item': i.name,
+                'Qty': i.qty,
+                'Harga Jual': i.finalPrice,
+                'Kategori': i.selectedPriceType,
+                'Pembeli': i.customerName,
+                'Kasir': i.cashierName,
+                'Status': i.transactionType === TransactionType.RETURN ? 'RETUR' : i.isReturned ? 'Retur Sebagian' : 'Normal'
+            };
+            if (showHPP) {
+                item['HPP'] = i.hpp || 0;
+            }
+            return item;
+        });
+
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Barang Terjual");
+
+        // Auto-width
+        worksheet['!cols'] = [
+            { wch: 15 }, // ID
+            { wch: 12 }, // Tanggal
+            { wch: 10 }, // Waktu
+            { wch: 30 }, // Item
+            { wch: 8 },  // Qty
+            ...(showHPP ? [{ wch: 15 }] : []), // HPP
+            { wch: 15 }, // Harga Jual
+            { wch: 15 }, // Kategori
+            { wch: 20 }, // Pembeli
+            { wch: 15 }, // Kasir
+            { wch: 15 }  // Status
+        ];
+
+        XLSX.writeFile(workbook, `Laporan_Barang_Terjual_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col gap-4 border-b border-slate-200 pb-4">
                 <div className="flex flex-wrap justify-between items-center gap-4">
-                    <h1 className="text-2xl font-bold text-slate-800">Laporan Barang Terjual</h1>
+                    <div>
+                        <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                            <ShoppingBag className="text-green-600" />
+                            Laporan Barang Terjual
+                        </h1>
+                        <p className="text-slate-500 text-sm mt-1">Laporan detail barang yang terjual dalam periode tertentu</p>
+                    </div>
                     <div className="flex gap-2">
                         <button onClick={handlePrint} className="text-sm flex items-center gap-2 bg-white border border-slate-300 px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
-                            <Download size={16} /> Print
+                            <Printer size={16} /> Print
+                        </button>
+                        <button onClick={handleExportExcel} className="text-sm flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-2 rounded-lg text-green-700 hover:bg-green-100">
+                            <FileSpreadsheet size={16} /> Excel
                         </button>
                         <button onClick={handleExport} className="text-sm flex items-center gap-2 bg-white border border-slate-300 px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
-                            <Download size={16} /> Export CSV
+                            <Download size={16} /> CSV
                         </button>
                     </div>
                 </div>
@@ -320,7 +374,7 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
                     <thead className="bg-slate-50 border-b border-slate-100 text-slate-500">
                         <tr>
                             <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('date')}>
-                                <div className="flex items-center">Waktu <SortIcon column="date" /></div>
+                                <div className="flex items-center">Tanggal <SortIcon column="date" /></div>
                             </th>
                             <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('transactionId')}>
                                 <div className="flex items-center">ID Transaksi <SortIcon column="transactionId" /></div>
@@ -361,7 +415,7 @@ export const SoldItems: React.FC<SoldItemsProps> = ({ currentUser }) => {
                             <tr key={`${item.transactionId}-${idx}`} className="hover:bg-slate-50">
                                 <td className="p-4 text-slate-600">
                                     <div className="flex flex-col">
-                                        <span>{new Date(item.date).toLocaleDateString('id-ID')}</span>
+                                        <span>{new Date(item.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                                         <span className="text-xs text-slate-400">{new Date(item.date).toLocaleTimeString('id-ID')}</span>
                                     </div>
                                 </td>

@@ -5,7 +5,8 @@ import { StorageService } from '../services/storage';
 import { Transaction, PaymentStatus, Customer, UserRole, User, PaymentMethod, StoreSettings, TransactionType } from '../types';
 import { formatIDR, formatDate, exportToCSV } from '../utils';
 import { generatePrintTransactionDetail } from '../utils/printHelpers';
-import { Download, Search, Filter, RotateCcw, X, Eye, FileText, Printer } from 'lucide-react';
+import { Download, Search, Filter, RotateCcw, X, Eye, FileText, Printer, FileSpreadsheet, UserCheck } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface CustomerHistoryProps {
     currentUser: User | null;
@@ -14,6 +15,7 @@ interface CustomerHistoryProps {
 export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser }) => {
     const transactions = useData(() => StorageService.getTransactions(), [], 'transactions') || [];
     const customers = useData(() => StorageService.getCustomers(), [], 'customers') || [];
+    const banks = useData(() => StorageService.getBanks(), [], 'banks') || [];
 
     // State
     const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -132,26 +134,76 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
 
 
     const handleExport = () => {
-        const headers = ['ID Transaksi', 'Tanggal', 'Pelanggan', 'Total', 'Dibayar', 'Sisa', 'Status', 'Metode', 'Kasir'];
-        const rows = filteredTransactions.map(t => [
-            t.id,
-            formatDate(t.date),
-            t.customerName,
-            t.totalAmount,
-            t.amountPaid,
-            t.totalAmount - t.amountPaid,
-            t.type === TransactionType.RETURN ? 'RETUR' : t.paymentStatus,
-            t.paymentMethod,
-            t.cashierName
-        ]);
+        const headers = ['ID Transaksi', 'Tanggal', 'Pelanggan', 'Total', 'Dibayar', 'Piutang', 'Kembalian', 'Status', 'Metode', 'Kasir'];
+        const rows = filteredTransactions.map(t => {
+            const remaining = t.totalAmount - t.amountPaid;
+            const piutang = remaining > 0 ? remaining : 0;
+            const kembalian = remaining < 0 ? Math.abs(remaining) : 0;
+            return [
+                t.id,
+                formatDate(t.date),
+                t.customerName,
+                t.totalAmount,
+                t.amountPaid,
+                piutang,
+                kembalian,
+                t.type === TransactionType.RETURN ? 'RETUR' : (t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus) + (t.isReturned ? ' (Ada Retur)' : ''),
+                t.paymentMethod,
+                t.cashierName
+            ];
+        });
         exportToCSV(`riwayat-pelanggan-${selectedCustomer?.name || 'all'}.csv`, headers, rows);
+    };
+
+    const handleExportExcel = () => {
+        const data = filteredTransactions.map(t => {
+            const remaining = t.totalAmount - t.amountPaid;
+            const piutang = remaining > 0 ? remaining : 0;
+            const kembalian = remaining < 0 ? Math.abs(remaining) : 0;
+            return {
+                'ID Transaksi': t.id,
+                'Tanggal': formatDate(t.date),
+                'Pelanggan': t.customerName,
+                'Total': t.totalAmount,
+                'Dibayar': t.amountPaid,
+                'Piutang': piutang,
+                'Kembalian': kembalian,
+                'Status': t.type === TransactionType.RETURN ? 'RETUR' : (t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus) + (t.isReturned ? ' (Ada Retur)' : ''),
+                'Metode': t.paymentMethod,
+                'Kasir': t.cashierName
+            };
+        });
+
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Riwayat Pelanggan");
+
+        // Auto-width
+        worksheet['!cols'] = [
+            { wch: 15 }, // ID
+            { wch: 15 }, // Tanggal
+            { wch: 20 }, // Pelanggan
+            { wch: 15 }, // Total
+            { wch: 15 }, // Dibayar
+            { wch: 15 }, // Piutang
+            { wch: 15 }, // Kembalian
+            { wch: 15 }, // Status
+            { wch: 15 }, // Metode
+            { wch: 15 }  // Kasir
+        ];
+
+        XLSX.writeFile(workbook, `Riwayat_Pelanggan_${selectedCustomer?.name || 'All'}_${new Date().toISOString().split('T')[0]}.xlsx`);
     };
 
     const handlePrint = () => {
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
 
-        const rows = filteredTransactions.map((t, idx) => `
+        const rows = filteredTransactions.map((t, idx) => {
+            const remaining = t.totalAmount - t.amountPaid;
+            const piutang = remaining > 0 ? remaining : 0;
+            const kembalian = remaining < 0 ? Math.abs(remaining) : 0;
+            return `
             <tr>
                 <td>${idx + 1}</td>
                 <td>${formatDate(t.date)}</td>
@@ -159,11 +211,13 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                 <td>${t.customerName}</td>
                 <td style="text-align:right">${formatIDR(t.totalAmount)}</td>
                 <td style="text-align:right">${formatIDR(t.amountPaid)}</td>
-                <td style="text-align:right">${formatIDR(t.totalAmount - t.amountPaid)}</td>
-                <td>${t.type === TransactionType.RETURN ? 'RETUR' : t.paymentStatus}</td>
+                <td style="text-align:right">${piutang > 0 ? formatIDR(piutang) : '-'}</td>
+                <td style="text-align:right">${kembalian > 0 ? formatIDR(kembalian) : '-'}</td>
+                <td>${t.type === TransactionType.RETURN ? 'RETUR' : (t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus) + (t.isReturned ? ' (Ada Retur)' : '')}</td>
                 <td>${t.cashierName}</td>
             </tr>
-        `).join('');
+        `;
+        }).join('');
 
         const html = `
             <html>
@@ -196,7 +250,8 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                 <th>Pelanggan</th>
                                 <th>Total</th>
                                 <th>Dibayar</th>
-                                <th>Sisa</th>
+                                <th>Piutang</th>
+                                <th>Kembalian</th>
                                 <th>Status</th>
                                 <th>Kasir</th>
                             </tr>
@@ -225,16 +280,25 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col gap-4 border-b border-slate-200 pb-4">
                 <div className="flex flex-wrap justify-between items-center gap-4">
-                    <h1 className="text-2xl font-bold text-slate-800">Riwayat Pelanggan</h1>
+                    <div>
+                        <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                            <UserCheck className="text-blue-600" />
+                            Riwayat Pelanggan
+                        </h1>
+                        <p className="text-slate-500 text-sm mt-1">Lacak riwayat transaksi dan aktivitas pelanggan</p>
+                    </div>
                     <div className="flex gap-2">
                         <button onClick={handlePrint} className="text-sm flex items-center gap-2 bg-white border border-slate-300 px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
                             <Printer size={16} /> Print
                         </button>
+                        <button onClick={handleExportExcel} className="text-sm flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-2 rounded-lg text-green-700 hover:bg-green-100">
+                            <FileSpreadsheet size={16} /> Excel
+                        </button>
                         <button onClick={handleExport} className="text-sm flex items-center gap-2 bg-white border border-slate-300 px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
-                            <Download size={16} /> Export CSV
+                            <Download size={16} /> CSV
                         </button>
                     </div>
                 </div>
@@ -381,7 +445,9 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                                     ? 'bg-orange-100 text-orange-600'
                                                     : 'bg-red-100 text-red-600'
                                             }`}>
-                                            {t.type === TransactionType.RETURN ? 'RETUR' : t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus}
+                                            {t.type === TransactionType.RETURN
+                                                ? 'RETUR'
+                                                : (t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus) + (t.isReturned ? ' (Ada Retur)' : '')}
                                         </span>
                                     </td>
                                     <td className="p-4 text-slate-600">{t.paymentMethod}</td>
@@ -434,6 +500,14 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                 <div>
                                     <span className="text-slate-500 block text-xs">Metode Awal</span>
                                     <span className="font-medium text-slate-900">{detailTransaction.paymentMethod}</span>
+                                    {(() => {
+                                        if (detailTransaction.bankId) {
+                                            const bank = banks.find(b => b.id === detailTransaction.bankId);
+                                            if (bank) return <span className="block text-xs text-blue-600">via {bank.bankName} {bank.accountNumber}</span>;
+                                        }
+                                        if (detailTransaction.bankName) return <span className="block text-xs text-blue-600">via {detailTransaction.bankName}</span>;
+                                        return null;
+                                    })()}
                                 </div>
                                 <div>
                                     <span className="text-slate-500 block text-xs">Status</span>
@@ -480,6 +554,11 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                                                 <div key={idx}>- {item.name} ({item.qty}x)</div>
                                                             ))}
                                                         </div>
+                                                        {ret.returnNote && (
+                                                            <div className="text-xs text-slate-600 mt-1 italic bg-white/50 p-1 rounded border border-orange-200">
+                                                                Catatan: {ret.returnNote}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <span className="font-medium text-red-600">{formatIDR(ret.totalAmount)}</span>
                                                 </div>
@@ -530,7 +609,14 @@ export const CustomerHistory: React.FC<CustomerHistoryProps> = ({ currentUser })
                                                 <span className="font-mono bg-slate-200 px-1 rounded text-[10px]">{new Date(ph.date).toLocaleTimeString('id-ID')}</span>
                                             </div>
                                             <span className="text-slate-700 block">{ph.note || 'Pembayaran'} ({ph.method})</span>
-                                            {ph.bankName && <span className="text-[10px] text-blue-600 italic">via {ph.bankName}</span>}
+                                            {(() => {
+                                                if (ph.bankId) {
+                                                    const bank = banks.find(b => b.id === ph.bankId);
+                                                    if (bank) return <span className="text-[10px] text-blue-600 italic">via {bank.bankName} {bank.accountNumber}</span>;
+                                                }
+                                                if (ph.bankName) return <span className="text-[10px] text-blue-600 italic">via {ph.bankName}</span>;
+                                                return null;
+                                            })()}
                                         </div>
                                         <span className="font-medium text-green-600">{formatIDR(ph.amount)}</span>
                                     </div>

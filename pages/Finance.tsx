@@ -4,8 +4,10 @@ import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
 import { Transaction, PaymentStatus, CashFlow, CashFlowType, Purchase, Supplier, PaymentMethod, CashFlow as CashFlowTypeInterface, StoreSettings, BankAccount, User, UserRole, TransactionType, PurchaseType } from '../types';
 import { formatIDR, formatDate, exportToCSV, generateId } from '../utils';
-import { generatePrintInvoice, generatePrintGoodsNote, generatePrintSuratJalan, generatePrintTransactionDetail, generatePrintPurchaseDetail } from '../utils/printHelpers';
-import { ArrowDownLeft, ArrowUpRight, Download, Plus, Printer, FileText, Filter, RotateCcw, X, Eye, ShoppingBag, Calendar, Clock, Search, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
+import { generatePrintInvoice, generatePrintGoodsNote, generatePrintSuratJalan, generatePrintTransactionDetail, generatePrintPurchaseDetail, generatePrintPurchaseNote } from '../utils/printHelpers';
+import { ArrowDownLeft, ArrowUpRight, Download, Plus, Printer, FileText, Filter, RotateCcw, X, Eye, ShoppingBag, Calendar, Clock, Search, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileSpreadsheet } from 'lucide-react';
+import { ConfirmationModal } from '../components/ui/ConfirmationModal';
+import * as XLSX from 'xlsx';
 
 interface FinanceProps {
     currentUser: User | null;
@@ -38,6 +40,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
     const [endDate, setEndDate] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [categoryFilter, setCategoryFilter] = useState(''); // Filter category for cashflow
+    const [paymentMethodFilter, setPaymentMethodFilter] = useState(''); // Filter payment method for cashflow
 
     // Sort State
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -116,6 +119,29 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
     const [returnPurchaseBankId, setReturnPurchaseBankId] = useState('');
     const [returnPurchaseManualAmount, setReturnPurchaseManualAmount] = useState('');
     const [returnPurchaseMode, setReturnPurchaseMode] = useState<'items' | 'manual'>('items');
+    const [returnTxNote, setReturnTxNote] = useState('');
+    const [returnTxMethod, setReturnTxMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
+    const [returnTxBankId, setReturnTxBankId] = useState('');
+    const [returnPurchaseNote, setReturnPurchaseNote] = useState('');
+
+    // Confirmation Modal State
+    const [confirmation, setConfirmation] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        confirmLabel: string;
+        cancelLabel: string;
+        onConfirm: () => void;
+        type: 'default' | 'danger' | 'warning';
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        confirmLabel: 'Konfirmasi',
+        cancelLabel: 'Batal',
+        onConfirm: () => { },
+        type: 'default'
+    });
 
     useEffect(() => {
         StorageService.getStoreSettings().then(setStoreSettings);
@@ -164,6 +190,8 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         }
 
         setReturnTxItems(itemsWithRemainingQty);
+        setReturnTxMethod(PaymentMethod.CASH);
+        setReturnTxBankId('');
         setIsReturnTxModalOpen(true);
     };
 
@@ -212,106 +240,127 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
     };
 
     const submitReturnTx = async () => {
-        if (!detailTransaction) return;
-        const itemsToReturn = returnTxItems.filter(i => i.qty > 0);
-        if (itemsToReturn.length === 0) return;
+        try {
+            if (!detailTransaction) return;
 
-        const totalReturnValue = itemsToReturn.reduce((sum, i) => sum + (i.qty * i.price), 0);
+            if (returnTxMethod === PaymentMethod.TRANSFER && !returnTxBankId) {
+                alert("Pilih rekening bank untuk pengembalian dana via transfer.");
+                return;
+            }
 
-        // 1. Hitung Hutang Saat Ini (Sisa Tagihan)
-        const currentDebt = detailTransaction.totalAmount - detailTransaction.amountPaid;
+            const itemsToReturn = returnTxItems.filter(i => i.qty > 0);
+            if (itemsToReturn.length === 0) {
+                alert("Pilih setidaknya satu barang untuk diretur.");
+                return;
+            }
 
-        // 2. Tentukan Alokasi Nilai Retur
-        // Prioritas: Potong Hutang dulu, baru Refund Tunai
-        const cutDebtAmount = Math.min(totalReturnValue, currentDebt);
-        const cashRefundAmount = totalReturnValue - cutDebtAmount;
+            const totalReturnValue = itemsToReturn.reduce((sum, i) => sum + (i.qty * i.price), 0);
 
-        const now = new Date().toISOString();
+            // 1. Hitung Hutang Saat Ini (Sisa Tagihan)
+            const currentDebt = detailTransaction.totalAmount - detailTransaction.amountPaid;
 
-        // 3. Update Transaksi Asal
-        // Always update isReturned status
-        let updatedOriginalTx = {
-            ...detailTransaction,
-            isReturned: true
-        };
+            // 2. Tentukan Alokasi Nilai Retur
+            // Prioritas: Potong Hutang dulu, baru Refund Tunai
+            const cutDebtAmount = Math.min(totalReturnValue, currentDebt);
+            const cashRefundAmount = totalReturnValue - cutDebtAmount;
 
-        // Jika ada potong hutang, update payment info
-        if (cutDebtAmount > 0) {
-            const newPaid = detailTransaction.amountPaid + cutDebtAmount;
-            const newStatus = newPaid >= detailTransaction.totalAmount ? PaymentStatus.PAID : PaymentStatus.PARTIAL;
+            const now = new Date().toISOString();
 
-            const updatedHistory = [...(detailTransaction.paymentHistory || [])];
-            updatedHistory.push({
-                date: now,
-                amount: cutDebtAmount,
-                method: PaymentMethod.CASH, // Dianggap sebagai pembayaran via retur
-                note: 'Potong Utang (Retur Barang)'
-            });
-
-            updatedOriginalTx = {
-                ...updatedOriginalTx,
-                amountPaid: newPaid,
-                paymentStatus: newStatus,
-                paymentHistory: updatedHistory,
-                change: 0
+            // 3. Update Transaksi Asal
+            // Always update isReturned status
+            let updatedOriginalTx = {
+                ...detailTransaction,
+                isReturned: true
             };
-        }
 
-        await StorageService.updateTransaction(updatedOriginalTx);
+            // Jika ada potong hutang, update payment info
+            if (cutDebtAmount > 0) {
+                const newPaid = detailTransaction.amountPaid + cutDebtAmount;
+                const newStatus = newPaid >= detailTransaction.totalAmount ? PaymentStatus.PAID : PaymentStatus.PARTIAL;
 
-        // 4. Buat Transaksi Retur (Record Stock In & History)
-        const returnTx: Transaction = {
-            id: generateId(),
-            type: TransactionType.RETURN,
-            originalTransactionId: detailTransaction.id,
-            date: now,
-            items: itemsToReturn.map(i => {
-                const originalItem = detailTransaction.items.find(oi => oi.id === i.id);
-                return {
-                    ...originalItem!,
-                    qty: i.qty,
-                    finalPrice: i.price
+                const updatedHistory = [...(detailTransaction.paymentHistory || [])];
+                updatedHistory.push({
+                    date: now,
+                    amount: cutDebtAmount,
+                    method: PaymentMethod.CASH, // Dianggap sebagai pembayaran via retur
+                    note: 'Potong Utang (Retur Barang)'
+                });
+
+                updatedOriginalTx = {
+                    ...updatedOriginalTx,
+                    amountPaid: newPaid,
+                    paymentStatus: newStatus,
+                    paymentHistory: updatedHistory,
+                    change: 0
                 };
-            }),
-            totalAmount: -totalReturnValue, // Negative for return
-            amountPaid: -totalReturnValue, // Anggap lunas
-            change: 0,
-            paymentStatus: PaymentStatus.PAID,
-            paymentMethod: PaymentMethod.CASH,
-            paymentNote: `Retur dari #${detailTransaction.id.substring(0, 6)}` + (cutDebtAmount > 0 ? ` (Potong Utang: ${formatIDR(cutDebtAmount)})` : ''),
-            customerName: detailTransaction.customerName,
-            cashierId: currentUser?.id || 'SYSTEM',
-            cashierName: currentUser?.name || 'System',
-            skipCashFlow: cutDebtAmount > 0 // Skip backend auto-cashflow if we are cutting debt (complex case)
-        };
+            }
 
-        await StorageService.addTransaction(returnTx);
+            await StorageService.updateTransaction(updatedOriginalTx);
 
-        // 5. Record Cash Out (Hanya jika ada uang tunai yang dikembalikan)
-        // If we cut debt, we skipped backend auto-cashflow, so we must add it manually here if there is a cash refund
-        if (cutDebtAmount > 0 && cashRefundAmount > 0) {
-            await StorageService.addCashFlow({
-                id: '',
+            // 4. Buat Transaksi Retur (Record Stock In & History)
+            const returnTx: Transaction = {
+                id: generateId(),
+                type: TransactionType.RETURN,
+                originalTransactionId: detailTransaction.id,
                 date: now,
-                type: CashFlowType.OUT,
-                amount: cashRefundAmount,
-                category: 'Retur Penjualan',
-                description: `Refund Retur Transaksi #${detailTransaction.id.substring(0, 6)}`,
-                paymentMethod: PaymentMethod.CASH,
-                userId: currentUser?.id,
-                userName: currentUser?.name,
-                referenceId: returnTx.id // Link to Return Transaction ID
-            });
+                items: itemsToReturn.map(i => {
+                    const originalItem = detailTransaction.items.find(oi => oi.id === i.id);
+                    return {
+                        ...originalItem!,
+                        qty: i.qty,
+                        finalPrice: i.price
+                    };
+                }),
+                totalAmount: -totalReturnValue, // Negative for return
+                amountPaid: -totalReturnValue, // Anggap lunas
+                change: 0,
+                paymentStatus: PaymentStatus.PAID,
+                paymentMethod: returnTxMethod,
+                bankId: returnTxMethod === PaymentMethod.TRANSFER ? returnTxBankId : undefined,
+                bankName: returnTxMethod === PaymentMethod.TRANSFER ? banks.find(b => b.id === returnTxBankId)?.bankName : undefined,
+                paymentNote: `Retur dari #${detailTransaction.id.substring(0, 6)}` + (cutDebtAmount > 0 ? ` (Potong Utang: ${formatIDR(cutDebtAmount)})` : ''),
+                returnNote: returnTxNote,
+                ...(detailTransaction.customerId && { customerId: detailTransaction.customerId }), // Only include if exists
+                customerName: detailTransaction.customerName,
+                cashierId: currentUser?.id || 'SYSTEM',
+                cashierName: currentUser?.name || 'System',
+                skipCashFlow: cutDebtAmount > 0 // Skip backend auto-cashflow if we are cutting debt (complex case)
+            };
+
+            await StorageService.addTransaction(returnTx);
+
+            // 5. Record Cash Out (Hanya jika ada uang tunai yang dikembalikan)
+            // If we cut debt, we skipped backend auto-cashflow, so we must add it manually here if there is a cash refund
+            if (cutDebtAmount > 0 && cashRefundAmount > 0) {
+                await StorageService.addCashFlow({
+                    id: '',
+                    date: now,
+                    type: CashFlowType.OUT,
+                    amount: cashRefundAmount,
+                    category: 'Retur Penjualan',
+                    description: `Refund Retur Transaksi #${detailTransaction.id.substring(0, 6)}` + (returnTxMethod === PaymentMethod.TRANSFER ? ` (via ${banks.find(b => b.id === returnTxBankId)?.bankName})` : ''),
+                    paymentMethod: returnTxMethod,
+                    bankId: returnTxMethod === PaymentMethod.TRANSFER ? returnTxBankId : undefined,
+                    bankName: returnTxMethod === PaymentMethod.TRANSFER ? banks.find(b => b.id === returnTxBankId)?.bankName : undefined,
+                    userId: currentUser?.id,
+                    userName: currentUser?.name,
+                    referenceId: returnTx.id // Link to Return Transaction ID
+                });
+            }
+
+            setIsReturnTxModalOpen(false);
+            setDetailTransaction(null);
+            setReturnTxNote('');
+
+            let message = 'Retur berhasil diproses.';
+            if (cutDebtAmount > 0) message += `\nDipotong dari hutang: ${formatIDR(cutDebtAmount)}`;
+            if (cashRefundAmount > 0) message += `\nDikembalikan tunai: ${formatIDR(cashRefundAmount)}`;
+
+            alert(message);
+        } catch (error) {
+            console.error('Error processing return:', error);
+            alert(`Gagal memproses retur: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
-
-        setIsReturnTxModalOpen(false);
-        setDetailTransaction(null);
-
-        let message = 'Retur berhasil diproses.';
-        if (cutDebtAmount > 0) message += `\nDipotong dari hutang: ${formatIDR(cutDebtAmount)}`;
-        if (cashRefundAmount > 0) message += `\nDikembalikan tunai: ${formatIDR(cashRefundAmount)}`;
-
-        alert(message);
     };
 
     const submitReturnPurchase = async () => {
@@ -345,10 +394,49 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
         const selectedBank = banks.find(b => b.id === returnPurchaseBankId);
 
+        // 1. Hitung Hutang Saat Ini (Sisa Tagihan)
+        const currentDebt = detailPurchase.totalAmount - detailPurchase.amountPaid;
+
+        // 2. Tentukan Alokasi Nilai Retur
+        // Prioritas: Potong Hutang dulu, baru Refund Tunai
+        const cutDebtAmount = Math.min(totalRefund, currentDebt);
+        const cashRefundAmount = totalRefund - cutDebtAmount;
+
+        const now = new Date().toISOString();
+
+        // 3. Update Pembelian Asal (Potong Utang)
+        let updatedOriginalPurchase = {
+            ...detailPurchase,
+            isReturned: true
+        };
+
+        if (cutDebtAmount > 0) {
+            const newPaid = detailPurchase.amountPaid + cutDebtAmount;
+            const newStatus = newPaid >= detailPurchase.totalAmount ? PaymentStatus.PAID : PaymentStatus.PARTIAL;
+
+            const updatedHistory = [...(detailPurchase.paymentHistory || [])];
+            updatedHistory.push({
+                date: now,
+                amount: cutDebtAmount,
+                method: PaymentMethod.CASH, // Dianggap sebagai pembayaran via retur
+                note: 'Potong Utang (Retur Pembelian)'
+            });
+
+            updatedOriginalPurchase = {
+                ...updatedOriginalPurchase,
+                amountPaid: newPaid,
+                paymentStatus: newStatus,
+                paymentHistory: updatedHistory
+            };
+        }
+
+        await StorageService.updatePurchase(updatedOriginalPurchase);
+
+        // 4. Buat Transaksi Retur Pembelian
         const returnPurchase: Purchase = {
             id: generateId(),
             type: PurchaseType.RETURN,
-            date: new Date().toISOString(),
+            date: now,
             supplierId: detailPurchase.supplierId,
             supplierName: detailPurchase.supplierName,
             originalPurchaseId: detailPurchase.id,
@@ -366,14 +454,33 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             amountPaid: -totalRefund,
             paymentStatus: PaymentStatus.PAID,
             paymentMethod: returnPurchaseMethod,
-            bankId: returnPurchaseBankId || undefined,
+            bankId: returnPurchaseMethod === PaymentMethod.TRANSFER ? returnPurchaseBankId : undefined,
             bankName: selectedBank?.bankName,
-            paymentHistory: []
+            paymentHistory: [],
+            returnNote: returnPurchaseNote + (cutDebtAmount > 0 ? ` (Potong Utang: ${formatIDR(cutDebtAmount)})` : ''),
+            skipCashFlow: cutDebtAmount > 0 // Skip backend auto-cashflow if we are cutting debt
         };
 
         await StorageService.addPurchase(returnPurchase);
 
-        // Record Cash In (Refund from Supplier) - Handled by Backend automatically now
+        // 5. Record Cash In (Hanya jika ada uang tunai yang dikembalikan)
+        // If we cut debt, we skipped backend auto-cashflow, so we must add it manually here if there is a cash refund
+        if (cutDebtAmount > 0 && cashRefundAmount > 0) {
+            await StorageService.addCashFlow({
+                id: '',
+                date: now,
+                type: CashFlowType.IN,
+                amount: cashRefundAmount,
+                category: 'Retur Pembelian',
+                description: `Refund Retur Pembelian #${detailPurchase.id.substring(0, 6)}` + (returnPurchaseMethod === PaymentMethod.TRANSFER ? ` (via ${selectedBank?.bankName})` : ''),
+                paymentMethod: returnPurchaseMethod,
+                bankId: returnPurchaseMethod === PaymentMethod.TRANSFER ? returnPurchaseBankId : undefined,
+                bankName: selectedBank?.bankName,
+                userId: currentUser?.id,
+                userName: currentUser?.name,
+                referenceId: returnPurchase.id
+            });
+        }
 
         setIsReturnPurchaseModalOpen(false);
         setDetailPurchase(null);
@@ -381,7 +488,13 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         setReturnPurchaseManualAmount('');
         setReturnPurchaseMethod(PaymentMethod.CASH);
         setReturnPurchaseBankId('');
-        alert('Retur pembelian berhasil diproses.');
+        setReturnPurchaseNote('');
+
+        let message = 'Retur pembelian berhasil diproses.';
+        if (cutDebtAmount > 0) message += `\nDipotong dari utang: ${formatIDR(cutDebtAmount)}`;
+        if (cashRefundAmount > 0) message += `\nDikembalikan tunai: ${formatIDR(cashRefundAmount)}`;
+
+        alert(message);
     };
 
     // Filter Logic
@@ -430,6 +543,11 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         return items.filter(cf => cf.category === categoryFilter);
     };
 
+    const applyPaymentMethodFilter = (items: CashFlow[]) => {
+        if (!paymentMethodFilter) return items;
+        return items.filter(cf => cf.paymentMethod === paymentMethodFilter);
+    };
+
     // Cashier Filter - Only show data created by the cashier
     const applyCashierFilter = (items: any[], type: 'transaction' | 'purchase' | 'cashflow') => {
         if (!currentUser || currentUser.role !== UserRole.CASHIER) return items;
@@ -437,8 +555,8 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         if (type === 'transaction') {
             return items.filter(item => item.cashierId === currentUser.id);
         } else if (type === 'purchase') {
-            // Purchases don't have cashierId, so cashiers see all purchases
-            return items;
+            // Filter purchases by userId
+            return items.filter(item => item.userId === currentUser.id);
         } else if (type === 'cashflow') {
             // Filter cashflows related to cashier's transactions OR all purchases
             const cashierTransactionIds = transactions
@@ -451,16 +569,16 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                     return true;
                 }
 
-                // 2. Allow all Purchase-related categories (since Cashiers see all purchases)
-                const purchaseCategories = [
-                    'Pembelian',
-                    'Pembelian Stok',
-                    'Pelunasan Utang Supplier',
-                    'Retur Pembelian'
-                ];
-                if (purchaseCategories.includes(item.category)) {
-                    return true;
-                }
+                // 2. Allow all Purchase-related categories (REMOVED - now relies on userId)
+                // const purchaseCategories = [
+                //     'Pembelian',
+                //     'Pembelian Stok',
+                //     'Pelunasan Utang Supplier',
+                //     'Retur Pembelian'
+                // ];
+                // if (purchaseCategories.includes(item.category)) {
+                //     return true;
+                // }
 
                 // 3. Check for Transaction-related items (Sales, Returns, Receivables)
                 // Check by Reference ID (Best)
@@ -521,7 +639,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
     const filteredTransactions = useMemo(() => sortItems(applySearch(applyDateFilter(applyCashierFilter(transactions, 'transaction')), 'transaction')), [transactions, searchQuery, startDate, endDate, sortConfig, currentUser]);
     const filteredPurchases = useMemo(() => sortItems(applySearch(applyDateFilter(applyCashierFilter(purchases, 'purchase')), 'purchase')), [purchases, searchQuery, startDate, endDate, sortConfig, currentUser]);
-    const filteredCashFlows = useMemo(() => sortItems(applySearch(applyCategoryFilter(applyDateFilter(applyCashierFilter(cashFlows, 'cashflow'))), 'cashflow')), [cashFlows, searchQuery, startDate, endDate, categoryFilter, sortConfig, currentUser]);
+    const filteredCashFlows = useMemo(() => sortItems(applySearch(applyPaymentMethodFilter(applyCategoryFilter(applyDateFilter(applyCashierFilter(cashFlows, 'cashflow')))), 'cashflow')), [cashFlows, searchQuery, startDate, endDate, categoryFilter, paymentMethodFilter, sortConfig, currentUser]);
 
     const visibleTransactions = useMemo(() => filteredTransactions.slice(0, visibleCount), [filteredTransactions, visibleCount]);
     const visiblePurchases = useMemo(() => filteredPurchases.slice(0, visibleCount), [filteredPurchases, visibleCount]);
@@ -812,7 +930,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             type: cfType,
             amount,
             category: cfCategory, // Use selected category
-            description: `${cfDesc} (via ${cfPaymentMethod}${selectedBank ? ` - ${selectedBank.bankName}` : ''})`,
+            description: `${cfDesc} (via ${cfPaymentMethod}${selectedBank ? ` - ${selectedBank.bankName} ${selectedBank.accountNumber}` : ''})`,
             paymentMethod: cfPaymentMethod,
             bankId: cfBankId,
             bankName: selectedBank?.bankName,
@@ -824,6 +942,16 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         setCfCategory(''); // Reset category
         setCfPaymentMethod(PaymentMethod.CASH);
         setCfBankId('');
+    };
+
+    const handleDeleteCashFlow = async (id: string) => {
+        if (!confirm("Hapus catatan arus kas ini?")) return;
+        try {
+            await StorageService.deleteCashFlow(id);
+        } catch (error) {
+            console.error("Failed to delete cashflow:", error);
+            alert("Gagal menghapus data. Pastikan Anda memiliki izin yang sesuai.");
+        }
     };
 
     // Profit Loss Calculation
@@ -877,10 +1005,17 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         let filename = 'export.csv';
 
         if (activeTab === 'history') {
-            headers = ['ID', 'Tanggal', 'Waktu', 'Pelanggan', 'Kasir', 'Total', 'Dibayar', 'Status', 'Metode'];
+            headers = ['ID', 'Tanggal', 'Waktu', 'Pelanggan', 'Keterangan', 'Kasir', 'Total', 'Dibayar', 'Piutang', 'Kembalian', 'Status', 'Metode'];
             rows = filteredTransactions.map(t => {
                 const d = new Date(t.date);
-                return [t.id, d.toLocaleDateString('id-ID'), d.toLocaleTimeString('id-ID'), t.customerName, t.cashierName, t.totalAmount, t.amountPaid, t.paymentStatus, t.paymentMethod]
+                const remaining = t.totalAmount - t.amountPaid;
+                const piutang = remaining > 0 ? remaining : 0;
+                const kembalian = remaining < 0 ? Math.abs(remaining) : 0;
+                let status = t.type === TransactionType.RETURN ? 'RETUR' : (t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus);
+                if (t.isReturned && t.type !== TransactionType.RETURN) {
+                    status += ' (Ada Retur)';
+                }
+                return [t.id, d.toLocaleDateString('id-ID'), d.toLocaleTimeString('id-ID'), t.customerName, t.paymentNote || '-', t.cashierName, t.totalAmount, t.amountPaid, piutang, kembalian, status, t.paymentMethod]
             });
             filename = 'laporan-transaksi.csv';
         } else if (activeTab === 'debt_customer') {
@@ -888,11 +1023,15 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             rows = receivables.map(r => [r.id, formatDate(r.date), r.customerName, r.totalAmount, r.amountPaid, r.totalAmount - r.amountPaid, r.paymentStatus]);
             filename = 'laporan-piutang-pelanggan.csv';
         } else if (activeTab === 'purchase_history') {
-            headers = ['ID', 'Tanggal', 'Waktu', 'Supplier', 'Keterangan', 'Total', 'Dibayar', 'Status'];
+            headers = ['ID', 'Tanggal', 'Waktu', 'Supplier', 'Keterangan', 'Jml Item', 'Total', 'Dibayar', 'Status'];
             rows = filteredPurchases.map(p => {
                 const d = new Date(p.date);
-                const status = p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus;
-                return [p.id, d.toLocaleDateString('id-ID'), d.toLocaleTimeString('id-ID'), p.supplierName, p.description, p.totalAmount, p.amountPaid, status]
+                const itemCount = p.items ? p.items.reduce((sum, i) => sum + i.qty, 0) : 0;
+                let status = p.type === PurchaseType.RETURN ? 'RETUR' : (p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus);
+                if (p.isReturned && p.type !== PurchaseType.RETURN) {
+                    status += ' (Ada Retur)';
+                }
+                return [p.id, d.toLocaleDateString('id-ID'), d.toLocaleTimeString('id-ID'), p.supplierName, p.description, itemCount, p.totalAmount, p.amountPaid, status]
             });
             filename = 'laporan-pembelian.csv';
         } else if (activeTab === 'debt_supplier') {
@@ -918,6 +1057,148 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         exportToCSV(filename, headers, rows);
     };
 
+    const handleExportExcel = () => {
+        let data: any[] = [];
+        let sheetName = "";
+        let fileNamePrefix = "";
+        let cols: any[] = [];
+
+        if (activeTab === 'history') {
+            sheetName = "Riwayat Transaksi";
+            fileNamePrefix = "Laporan_Transaksi";
+            data = filteredTransactions.map(t => {
+                const itemsSummary = t.items.map(i => `${i.name} (${i.qty}x)`).join(', ');
+                const remaining = t.totalAmount - t.amountPaid;
+                const piutang = remaining > 0 ? remaining : 0;
+                const kembalian = remaining < 0 ? Math.abs(remaining) : 0;
+                let status = t.type === TransactionType.RETURN ? 'RETUR' : (t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus);
+                if (t.isReturned && t.type !== TransactionType.RETURN) {
+                    status += ' (Ada Retur)';
+                }
+                return {
+                    'ID Transaksi': t.id,
+                    'Tanggal': new Date(t.date).toLocaleDateString('id-ID'),
+                    'Waktu': new Date(t.date).toLocaleTimeString('id-ID'),
+                    'Tipe': t.type === TransactionType.RETURN ? 'RETUR' : 'PENJUALAN',
+                    'Pelanggan': t.customerName,
+                    'Item': itemsSummary,
+                    'Total': t.totalAmount,
+                    'Dibayar': t.amountPaid,
+                    'Piutang': piutang,
+                    'Kembalian': kembalian,
+                    'Status': status,
+                    'Metode Bayar': t.paymentMethod,
+                    'Bank': t.bankName || '-',
+                    'Keterangan': t.paymentNote || '-'
+                };
+            });
+            cols = [
+                { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 20 },
+                { wch: 50 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+                { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 20 }
+            ];
+        } else if (activeTab === 'debt_customer') {
+            sheetName = "Piutang Pelanggan";
+            fileNamePrefix = "Laporan_Piutang_Pelanggan";
+            data = receivables.map(r => ({
+                'ID Transaksi': r.id,
+                'Tanggal': formatDate(r.date),
+                'Pelanggan': r.customerName,
+                'Total Tagihan': r.totalAmount,
+                'Sudah Dibayar': r.amountPaid,
+                'Sisa Piutang': r.totalAmount - r.amountPaid,
+                'Status': r.paymentStatus
+            }));
+            cols = [
+                { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }
+            ];
+        } else if (activeTab === 'purchase_history') {
+            sheetName = "Riwayat Pembelian";
+            fileNamePrefix = "Laporan_Pembelian";
+            data = filteredPurchases.map(p => {
+                const itemsSummary = p.items ? p.items.map(i => `${i.name} (${i.qty}x)`).join(', ') : '-';
+                const itemCount = p.items ? p.items.reduce((sum, i) => sum + i.qty, 0) : 0;
+                let status = p.type === PurchaseType.RETURN ? 'RETUR' : (p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus);
+                if (p.isReturned && p.type !== PurchaseType.RETURN) {
+                    status += ' (Ada Retur)';
+                }
+                return {
+                    'ID Pembelian': p.id,
+                    'Tanggal': new Date(p.date).toLocaleDateString('id-ID'),
+                    'Waktu': new Date(p.date).toLocaleTimeString('id-ID'),
+                    'Supplier': p.supplierName,
+                    'Keterangan': p.description,
+                    'Item': itemsSummary,
+                    'Jml Item': itemCount,
+                    'Total': p.totalAmount,
+                    'Dibayar': p.amountPaid,
+                    'Status': status,
+                    'Metode Bayar': p.paymentMethod,
+                    'Bank': p.bankName || '-'
+                };
+            });
+            cols = [
+                { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 30 },
+                { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }
+            ];
+        } else if (activeTab === 'debt_supplier') {
+            sheetName = "Utang Supplier";
+            fileNamePrefix = "Laporan_Utang_Supplier";
+            data = payables.map(p => ({
+                'ID Pembelian': p.id,
+                'Tanggal': formatDate(p.date),
+                'Supplier': p.supplierName,
+                'Keterangan': p.description,
+                'Total Tagihan': p.totalAmount,
+                'Sudah Dibayar': p.amountPaid,
+                'Sisa Utang': p.totalAmount - p.amountPaid,
+                'Status': p.paymentStatus
+            }));
+            cols = [
+                { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }
+            ];
+        } else if (activeTab === 'cashflow') {
+            sheetName = "Arus Kas";
+            fileNamePrefix = "Laporan_Arus_Kas";
+            data = filteredCashFlows.map(c => ({
+                'Tanggal': new Date(c.date).toLocaleDateString('id-ID'),
+                'Waktu': new Date(c.date).toLocaleTimeString('id-ID'),
+                'Tipe': c.type === CashFlowType.IN ? 'MASUK' : 'KELUAR',
+                'Kategori': c.category,
+                'Jumlah': c.amount,
+                'Keterangan': c.description,
+                'Metode': c.paymentMethod,
+                'Bank': c.bankName || '-'
+            }));
+            cols = [
+                { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 20 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 15 }
+            ];
+        } else if (activeTab === 'profit_loss') {
+            sheetName = "Laba Rugi";
+            fileNamePrefix = "Laporan_Laba_Rugi";
+            data = [
+                { 'Item': 'Pendapatan Penjualan (Omzet)', 'Nilai': plData.revenue },
+                { 'Item': 'Harga Pokok Penjualan (HPP)', 'Nilai': plData.cogs },
+                { 'Item': 'Laba Kotor', 'Nilai': plData.grossProfit },
+                { 'Item': 'Beban Operasional', 'Nilai': plData.expenses },
+                { 'Item': 'Laba Bersih', 'Nilai': plData.netProfit }
+            ];
+            cols = [{ wch: 30 }, { wch: 20 }];
+        } else {
+            return;
+        }
+
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+
+        if (cols.length > 0) {
+            worksheet['!cols'] = cols;
+        }
+
+        XLSX.writeFile(workbook, `${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
     const handleCleanPrint = () => {
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
@@ -927,17 +1208,30 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
 
         if (activeTab === 'history') {
             title = 'Laporan Transaksi Penjualan';
-            const rows = filteredTransactions.map(t => `
+            const rows = filteredTransactions.map(t => {
+                const remaining = t.totalAmount - t.amountPaid;
+                const piutang = remaining > 0 ? remaining : 0;
+                const kembalian = remaining < 0 ? Math.abs(remaining) : 0;
+                let status = t.type === TransactionType.RETURN ? 'RETUR' : (t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus);
+                if (t.isReturned && t.type !== TransactionType.RETURN) {
+                    status += ' (Ada Retur)';
+                }
+                return `
               <tr>
                   <td>${t.id.substring(0, 8)}</td>
                   <td>${formatDate(t.date)}</td>
                   <td>${t.customerName}</td>
+                  <td>${t.paymentNote || '-'}</td>
                   <td>${t.cashierName}</td>
                   <td style="text-align:right">${formatIDR(t.totalAmount)}</td>
-                  <td>${t.paymentStatus}</td>
+                  <td style="text-align:right">${formatIDR(t.amountPaid)}</td>
+                  <td style="text-align:right">${piutang > 0 ? formatIDR(piutang) : '-'}</td>
+                  <td style="text-align:right">${kembalian > 0 ? formatIDR(kembalian) : '-'}</td>
+                  <td>${status}</td>
               </tr>
-          `).join('');
-            content = `<thead><tr><th>ID</th><th>Tanggal & Waktu</th><th>Pelanggan</th><th>Kasir</th><th>Total</th><th>Status</th></tr></thead><tbody>${rows}</tbody>`;
+          `;
+            }).join('');
+            content = `<thead><tr><th>ID</th><th>Tanggal & Waktu</th><th>Pelanggan</th><th>Keterangan</th><th>Kasir</th><th>Total</th><th>Dibayar</th><th>Piutang</th><th>Kembalian</th><th>Status</th></tr></thead><tbody>${rows}</tbody>`;
         } else if (activeTab === 'debt_customer') {
             title = 'Laporan Piutang Pelanggan';
             const rows = receivables.map(r => `
@@ -953,17 +1247,25 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
             content = `<thead><tr><th>ID</th><th>Tanggal</th><th>Pelanggan</th><th>Total</th><th>Dibayar</th><th>Sisa Utang</th></tr></thead><tbody>${rows}</tbody>`;
         } else if (activeTab === 'purchase_history') {
             title = 'Laporan Pembelian Stok';
-            const rows = filteredPurchases.map(p => `
+            const rows = filteredPurchases.map(p => {
+                const itemCount = p.items ? p.items.reduce((sum, i) => sum + i.qty, 0) : 0;
+                let status = p.type === PurchaseType.RETURN ? 'RETUR' : (p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus);
+                if (p.isReturned && p.type !== PurchaseType.RETURN) {
+                    status += ' (Ada Retur)';
+                }
+                return `
               <tr>
                   <td>${p.id.substring(0, 8)}</td>
                   <td>${formatDate(p.date)}</td>
                   <td>${p.supplierName}</td>
                   <td>${p.description}</td>
+                  <td style="text-align:center">${itemCount}</td>
                   <td style="text-align:right">${formatIDR(p.totalAmount)}</td>
-                  <td>${p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus}</td>
+                  <td>${status}</td>
               </tr>
-          `).join('');
-            content = `<thead><tr><th>ID</th><th>Tanggal & Waktu</th><th>Supplier</th><th>Keterangan</th><th>Total</th><th>Status</th></tr></thead><tbody>${rows}</tbody>`;
+          `;
+            }).join('');
+            content = `<thead><tr><th>ID</th><th>Tanggal & Waktu</th><th>Supplier</th><th>Keterangan</th><th>Item</th><th>Total</th><th>Status</th></tr></thead><tbody>${rows}</tbody>`;
         } else if (activeTab === 'debt_supplier') {
             title = 'Laporan Utang Supplier';
             const rows = payables.map(p => `
@@ -1092,11 +1394,101 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
         w.document.close();
     };
 
+    const printPurchaseNote = (purchase: Purchase) => {
+        const settings = storeSettings || { name: 'KasirPintar' } as StoreSettings;
+        const w = window.open('', '', 'width=800,height=600');
+        if (!w) return;
+
+        const html = generatePrintPurchaseNote(purchase, settings, formatIDR, formatDate);
+        w.document.write(html);
+        w.document.close();
+    };
+
     // Render logic helper
     const numericInput = (val: string) => val.replace(/[^0-9]/g, '');
 
+    // --- CONFIRMATION WRAPPERS ---
+
+    const initiateRepaymentCustomer = () => {
+        if (!selectedDebt) return;
+        const pay = parseFloat(repaymentAmount) || 0;
+        if (pay <= 0) {
+            alert("Masukkan nominal pembayaran yang valid.");
+            return;
+        }
+        if (repaymentMethod === PaymentMethod.TRANSFER && !repaymentBankId) {
+            alert("Pilih rekening bank tujuan transfer.");
+            return;
+        }
+        const remainingDebt = selectedDebt.totalAmount - selectedDebt.amountPaid;
+        if (pay > remainingDebt) {
+            alert(`Nominal pembayaran melebihi sisa piutang (${formatIDR(remainingDebt)}).`);
+            return;
+        }
+
+        setConfirmation({
+            isOpen: true,
+            title: 'Konfirmasi Pembayaran Piutang',
+            message: `Cek kembali data pembayaran:\n\nPelanggan: ${selectedDebt.customerName}\nNominal: ${formatIDR(pay)}\nMetode: ${repaymentMethod}\n\nLanjutkan proses pembayaran?`,
+            confirmLabel: 'Proses',
+            cancelLabel: 'Batal',
+            onConfirm: handleRepaymentCustomer,
+            type: 'warning'
+        });
+    };
+
+    const initiateRepaymentSupplier = () => {
+        if (!selectedPayable) return;
+        const pay = parseFloat(payableRepaymentAmount) || 0;
+        if (pay <= 0) {
+            alert("Masukkan nominal pembayaran yang valid.");
+            return;
+        }
+        if (payableRepaymentMethod === PaymentMethod.TRANSFER && !payableBankId) {
+            alert("Pilih rekening bank sumber transfer.");
+            return;
+        }
+        const remainingDebt = selectedPayable.totalAmount - selectedPayable.amountPaid;
+        if (pay > remainingDebt) {
+            alert(`Nominal pembayaran melebihi sisa utang (${formatIDR(remainingDebt)}).`);
+            return;
+        }
+
+        setConfirmation({
+            isOpen: true,
+            title: 'Konfirmasi Pembayaran Utang',
+            message: `Cek kembali data pembayaran:\n\nSupplier: ${selectedPayable.supplierName}\nNominal: ${formatIDR(pay)}\nMetode: ${payableRepaymentMethod}\n\nLanjutkan proses pembayaran?`,
+            confirmLabel: 'Proses',
+            cancelLabel: 'Batal',
+            onConfirm: handleRepaymentSupplier,
+            type: 'warning'
+        });
+    };
+
+    const initiateAddCashFlow = () => {
+        const amount = parseFloat(cfAmount);
+        if (!amount || !cfDesc || !cfCategory) {
+            alert("Mohon lengkapi jumlah, kategori, dan keterangan.");
+            return;
+        }
+        if (cfPaymentMethod === PaymentMethod.TRANSFER && !cfBankId) {
+            alert("Pilih rekening bank.");
+            return;
+        }
+
+        setConfirmation({
+            isOpen: true,
+            title: 'Konfirmasi Catat Kas Manual',
+            message: `Cek kembali data kas manual:\n\nTipe: ${cfType === CashFlowType.IN ? 'Uang Masuk' : 'Uang Keluar'}\nKategori: ${cfCategory}\nNominal: ${formatIDR(amount)}\nKeterangan: ${cfDesc}\n\nSimpan catatan ini?`,
+            confirmLabel: 'Catat',
+            cancelLabel: 'Batal',
+            onConfirm: handleAddCashFlow,
+            type: 'warning'
+        });
+    };
+
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col gap-4 border-b border-slate-200 pb-4">
                 {/* Top Controls */}
                 <div className="flex flex-wrap justify-between items-center gap-4">
@@ -1120,8 +1512,11 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                         ))}
                     </div>
                     <div className="flex gap-2">
+                        <button onClick={handleExportExcel} className="text-sm flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-2 rounded-lg text-green-700 hover:bg-green-100">
+                            <FileSpreadsheet size={16} /> Excel
+                        </button>
                         <button onClick={handleExport} className="text-sm flex items-center gap-2 bg-white border border-slate-300 px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
-                            <Download size={16} /> Export
+                            <Download size={16} /> CSV
                         </button>
                         <button onClick={handleCleanPrint} className="text-sm flex items-center gap-2 bg-white border border-slate-300 px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
                             <Printer size={16} /> Print
@@ -1173,6 +1568,23 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 {Array.from(new Set(cashFlows.map(cf => cf.category))).sort().map(cat => (
                                     <option key={cat} value={cat}>{cat}</option>
                                 ))}
+                            </select>
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                                <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </div>
+                        </div>
+
+                        <div className="relative w-full max-w-xs">
+                            <select
+                                className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-sm text-slate-700 pr-10 appearance-none cursor-pointer"
+                                value={paymentMethodFilter}
+                                onChange={e => setPaymentMethodFilter(e.target.value)}
+                            >
+                                <option value="">Semua Metode</option>
+                                <option value={PaymentMethod.CASH}>Tunai</option>
+                                <option value={PaymentMethod.TRANSFER}>Transfer</option>
                             </select>
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                                 <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1303,6 +1715,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('id')}>ID <SortIcon column="id" /></th>
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('date')}>Waktu <SortIcon column="date" /></th>
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('customerName')}>Pelanggan <SortIcon column="customerName" /></th>
+                                <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('paymentNote')}>Keterangan <SortIcon column="paymentNote" /></th>
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('totalAmount')}>Total <SortIcon column="totalAmount" /></th>
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('paymentStatus')}>Status <SortIcon column="paymentStatus" /></th>
                                 <th className="p-4 font-medium text-right">Aksi</th>
@@ -1319,6 +1732,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                         </div>
                                     </td>
                                     <td className="p-4 font-medium text-slate-800">{t.customerName}</td>
+                                    <td className="p-4 text-slate-600">{t.paymentNote || '-'}</td>
                                     <td className="p-4 text-slate-800">{formatIDR(t.totalAmount)}</td>
                                     <td className="p-4">
                                         <span className={`px-2 py-1 rounded text-xs font-bold ${t.type === TransactionType.RETURN
@@ -1330,7 +1744,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                     : 'bg-orange-100 text-orange-600'
                                             }`}>
                                             {t.type === TransactionType.RETURN ? 'RETUR' : t.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : t.paymentStatus}
-                                            {t.isReturned && !t.type && ' (Ada Retur)'}
+                                            {t.isReturned && t.type !== TransactionType.RETURN ? ' (Ada Retur)' : ''}
                                         </span>
                                     </td>
                                     <td className="p-4 text-right">
@@ -1488,7 +1902,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     />
                                 </div>
                                 <button
-                                    onClick={handleRepaymentCustomer}
+                                    onClick={initiateRepaymentCustomer}
                                     className="w-full bg-slate-900 text-white py-2 rounded-lg font-semibold hover:bg-slate-800"
                                 >
                                     Proses Pembayaran
@@ -1521,13 +1935,15 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('date')}>Tanggal <SortIcon column="date" /></th>
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('supplierName')}>Supplier <SortIcon column="supplierName" /></th>
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('description')}>Keterangan <SortIcon column="description" /></th>
+                                <th className="p-4 font-medium">Item</th>
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('totalAmount')}>Total <SortIcon column="totalAmount" /></th>
                                 <th className="p-4 font-medium cursor-pointer hover:bg-slate-100" onClick={() => handleSort('paymentStatus')}>Status <SortIcon column="paymentStatus" /></th>
+                                <th className="p-4 font-medium text-right">Aksi</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {visiblePurchases.map(p => (
-                                <tr key={p.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setDetailPurchase(p)}>
+                                <tr key={p.id} className="hover:bg-slate-50 cursor-pointer group" onClick={() => setDetailPurchase(p)}>
                                     <td className="p-4 font-mono text-xs text-slate-400">#{p.id.substring(0, 6)}</td>
                                     <td className="p-4 text-slate-600">
                                         <div className="flex flex-col">
@@ -1537,6 +1953,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     </td>
                                     <td className="p-4 font-medium text-slate-800">{p.supplierName}</td>
                                     <td className="p-4 text-slate-600">{p.description}</td>
+                                    <td className="p-4 text-slate-600">{p.items ? p.items.reduce((sum, i) => sum + i.qty, 0) : 0}</td>
                                     <td className="p-4 text-slate-800">{formatIDR(p.totalAmount)}</td>
                                     <td className="p-4">
                                         <span className={`px-2 py-1 rounded text-xs font-bold ${p.type === PurchaseType.RETURN
@@ -1548,7 +1965,15 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                     : 'bg-red-100 text-red-600'
                                             }`}>
                                             {p.type === PurchaseType.RETURN ? 'RETUR' : p.paymentStatus === 'BELUM_LUNAS' ? 'BELUM LUNAS' : p.paymentStatus}
+                                            {p.isReturned && p.type !== PurchaseType.RETURN ? ' (Ada Retur)' : ''}
                                         </span>
+                                    </td>
+                                    <td className="p-4 text-right">
+                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={(e) => { e.stopPropagation(); printPurchaseNote(p); }} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 flex items-center gap-1" title="Cetak Nota">
+                                                <Printer size={12} /> Nota
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -1688,7 +2113,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     />
                                 </div>
                                 <button
-                                    onClick={handleRepaymentSupplier}
+                                    onClick={initiateRepaymentSupplier}
                                     className="w-full bg-slate-900 text-white py-2 rounded-lg font-semibold hover:bg-slate-800"
                                 >
                                     Bayar Utang
@@ -1734,24 +2159,52 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                         )}
                         <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
                             {visibleCashFlows.map(cf => (
-                                <div key={cf.id} className="p-4 flex items-center justify-between">
+                                <div key={cf.id} className="p-4 flex items-center justify-between group hover:bg-slate-50 transition-colors">
                                     <div className="flex items-center gap-3">
                                         <div className={`p-2 rounded-full ${cf.type === CashFlowType.IN ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
                                             {cf.type === CashFlowType.IN ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}
                                         </div>
                                         <div>
                                             <p className="font-medium text-slate-800">{cf.category}</p>
-                                            <p className="text-xs text-slate-500">{cf.description}</p>
+                                            <p className="text-xs text-slate-500">
+                                                {cf.description}
+                                                {(() => {
+                                                    if (cf.bankId) {
+                                                        const bank = banks.find(b => b.id === cf.bankId);
+                                                        if (bank && !cf.description.includes(bank.accountNumber)) {
+                                                            if (cf.description.toLowerCase().includes(bank.bankName.toLowerCase())) {
+                                                                return <span> - {bank.accountNumber}</span>;
+                                                            }
+                                                            return <span className="text-blue-600"> (via {bank.bankName} - {bank.accountNumber})</span>;
+                                                        }
+                                                    }
+                                                    return null;
+                                                })()}
+                                            </p>
                                         </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className={`font-bold ${cf.type === CashFlowType.IN ? 'text-green-600' : 'text-red-600'}`}>
-                                            {cf.type === CashFlowType.IN ? '+' : '-'}{formatIDR(cf.amount)}
-                                        </p>
-                                        <div className="flex flex-col">
-                                            <span className="text-xs text-slate-400">{formatDate(cf.date)}</span>
-                                            <span className="text-[10px] text-slate-300">{new Date(cf.date).toLocaleTimeString('id-ID')}</span>
+                                    <div className="flex items-center gap-4">
+                                        <div className="text-right">
+                                            <p className={`font-bold ${cf.type === CashFlowType.IN ? 'text-green-600' : 'text-red-600'}`}>
+                                                {cf.type === CashFlowType.IN ? '+' : '-'}{formatIDR(cf.amount)}
+                                            </p>
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-slate-400">{formatDate(cf.date)}</span>
+                                                <span className="text-[10px] text-slate-300">{new Date(cf.date).toLocaleTimeString('id-ID')}</span>
+                                            </div>
                                         </div>
+                                        {!cf.referenceId && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteCashFlow(cf.id);
+                                                }}
+                                                className="text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 p-2"
+                                                title="Hapus Catatan Manual"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -1837,7 +2290,7 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 )}
                             </div>
                             <button
-                                onClick={handleAddCashFlow}
+                                onClick={initiateAddCashFlow}
                                 className="w-full bg-slate-900 text-white py-2 rounded-lg font-semibold hover:bg-slate-800"
                             >
                                 Simpan Catatan
@@ -1874,7 +2327,14 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 <div>
                                     <span className="text-slate-500 block text-xs">Metode Awal</span>
                                     <span className="font-medium text-slate-900">{detailTransaction.paymentMethod}</span>
-                                    {detailTransaction.bankName && <span className="block text-xs text-blue-600">via {detailTransaction.bankName}</span>}
+                                    {(() => {
+                                        if (detailTransaction.bankId) {
+                                            const bank = banks.find(b => b.id === detailTransaction.bankId);
+                                            if (bank) return <span className="block text-xs text-blue-600">via {bank.bankName} {bank.accountNumber}</span>;
+                                        }
+                                        if (detailTransaction.bankName) return <span className="block text-xs text-blue-600">via {detailTransaction.bankName}</span>;
+                                        return null;
+                                    })()}
                                 </div>
                                 <div>
                                     <span className="text-slate-500 block text-xs">Status Retur</span>
@@ -1921,6 +2381,11 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                                 <div key={idx}>- {item.name} ({item.qty}x)</div>
                                                             ))}
                                                         </div>
+                                                        {ret.returnNote && (
+                                                            <div className="text-xs text-slate-600 mt-1 italic bg-white/50 p-1 rounded border border-orange-200">
+                                                                Catatan: {ret.returnNote}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <span className="font-medium text-red-600">{formatIDR(ret.totalAmount)}</span>
                                                 </div>
@@ -1971,7 +2436,14 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                 <span className="font-mono bg-slate-200 px-1 rounded text-[10px]">{new Date(ph.date).toLocaleTimeString('id-ID')}</span>
                                             </div>
                                             <span className="text-slate-700 block">{ph.note || 'Pembayaran'} ({ph.method})</span>
-                                            {ph.bankName && <span className="text-[10px] text-blue-600 italic">via {ph.bankName}</span>}
+                                            {(() => {
+                                                if (ph.bankId) {
+                                                    const bank = banks.find(b => b.id === ph.bankId);
+                                                    if (bank) return <span className="text-[10px] text-blue-600 italic">via {bank.bankName} {bank.accountNumber}</span>;
+                                                }
+                                                if (ph.bankName) return <span className="text-[10px] text-blue-600 italic">via {ph.bankName}</span>;
+                                                return null;
+                                            })()}
                                         </div>
                                         <span className="font-medium text-green-600">{formatIDR(ph.amount)}</span>
                                     </div>
@@ -2051,6 +2523,17 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                 document.body
             )}
 
+            <ConfirmationModal
+                isOpen={confirmation.isOpen}
+                onClose={() => setConfirmation(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmation.onConfirm}
+                title={confirmation.title}
+                message={confirmation.message}
+                confirmLabel={confirmation.confirmLabel}
+                cancelLabel={confirmation.cancelLabel}
+                type={confirmation.type}
+            />
+
             {/* PURCHASE DETAIL MODAL */}
             {detailPurchase && createPortal(
                 <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 bg-black/40 backdrop-blur-md z-[99999] flex items-center justify-center p-4 overflow-y-auto">
@@ -2074,6 +2557,14 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 <div>
                                     <span className="text-slate-500 block text-xs">Metode Awal</span>
                                     <span className="font-medium text-slate-900">{detailPurchase.paymentMethod}</span>
+                                    {(() => {
+                                        if (detailPurchase.bankId) {
+                                            const bank = banks.find(b => b.id === detailPurchase.bankId);
+                                            if (bank) return <span className="block text-xs text-blue-600">via {bank.bankName} {bank.accountNumber}</span>;
+                                        }
+                                        if (detailPurchase.bankName) return <span className="block text-xs text-blue-600">via {detailPurchase.bankName}</span>;
+                                        return null;
+                                    })()}
                                 </div>
                                 <div>
                                     <span className="text-slate-500 block text-xs">Status</span>
@@ -2088,10 +2579,31 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                 {detailPurchase.description}
                             </div>
 
-                            <div className="flex justify-between font-bold text-slate-900 mb-6 border-b border-slate-200 pb-2">
-                                <span>Total Pembelian</span>
-                                <span>{formatIDR(detailPurchase.totalAmount)}</span>
-                            </div>
+                            {detailPurchase.items && detailPurchase.items.length > 0 ? (
+                                <div className="mb-6">
+                                    <h4 className="font-bold text-sm text-slate-800 mb-2">Rincian Barang Stok</h4>
+                                    <div className="border rounded-lg overflow-hidden">
+                                        {detailPurchase.items.map((item, i) => (
+                                            <div key={i} className="flex justify-between p-3 border-b last:border-0 text-sm">
+                                                <div>
+                                                    <span className="block font-medium text-slate-700">{item.name}</span>
+                                                    <span className="text-xs text-slate-500">{item.qty} x {formatIDR(item.finalPrice)}</span>
+                                                </div>
+                                                <span className="font-medium text-slate-800">{formatIDR(item.finalPrice * item.qty)}</span>
+                                            </div>
+                                        ))}
+                                        <div className="bg-slate-50 p-3 flex justify-between font-bold text-slate-900">
+                                            <span>Total</span>
+                                            <span>{formatIDR(detailPurchase.totalAmount)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex justify-between font-bold text-slate-900 mb-6 border-b border-slate-200 pb-2">
+                                    <span>Total Pembelian</span>
+                                    <span>{formatIDR(detailPurchase.totalAmount)}</span>
+                                </div>
+                            )}
 
                             {/* Return History (If this is a Purchase) */}
                             {purchases.filter(p => p.type === 'RETURN' && (
@@ -2119,6 +2631,11 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                             <div className="text-xs text-slate-500 mt-1 italic">
                                                                 {ret.description}
                                                             </div>
+                                                            {ret.returnNote && (
+                                                                <div className="text-xs text-slate-600 mt-1 italic bg-white/50 p-1 rounded border border-orange-200">
+                                                                    Catatan: {ret.returnNote}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                         <span className="font-medium text-red-600">{formatIDR(ret.totalAmount)}</span>
                                                     </div>
@@ -2133,12 +2650,21 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     <h4 className="font-bold text-sm text-slate-800 mb-2">Info Pembelian Induk</h4>
                                     <div className="bg-blue-50 rounded-lg p-3 text-sm border border-blue-100">
                                         {(() => {
-                                            // Extract original ID from description if possible, or search by fuzzy match
-                                            // Assuming description format "Retur dari pembelian #ID..."
-                                            const originalIdMatch = detailPurchase.description.match(/#([a-zA-Z0-9-]+)/);
-                                            const originalId = originalIdMatch ? originalIdMatch[1] : null;
+                                            let originalTx = null;
 
-                                            const originalTx = originalId ? purchases.find(p => p.id === originalId || p.id.startsWith(originalId)) : null;
+                                            // 1. Try to find by originalPurchaseId (Best)
+                                            if (detailPurchase.originalPurchaseId) {
+                                                originalTx = purchases.find(p => p.id === detailPurchase.originalPurchaseId);
+                                            }
+
+                                            // 2. Fallback: Extract from description (Legacy)
+                                            if (!originalTx) {
+                                                const originalIdMatch = detailPurchase.description.match(/#([a-zA-Z0-9-]+)/);
+                                                const originalId = originalIdMatch ? originalIdMatch[1] : null;
+                                                if (originalId) {
+                                                    originalTx = purchases.find(p => p.id === originalId || p.id.startsWith(originalId));
+                                                }
+                                            }
 
                                             if (originalTx) {
                                                 return (
@@ -2174,7 +2700,14 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                                 <span>{new Date(ph.date).toLocaleDateString('id-ID')}</span>
                                             </div>
                                             <span className="text-slate-700 block">{ph.note || 'Pembayaran'} ({ph.method})</span>
-                                            {ph.bankName && <span className="text-[10px] text-blue-600 italic">via {ph.bankName}</span>}
+                                            {(() => {
+                                                if (ph.bankId) {
+                                                    const bank = banks.find(b => b.id === ph.bankId);
+                                                    if (bank) return <span className="text-[10px] text-blue-600 italic">via {bank.bankName} {bank.accountNumber}</span>;
+                                                }
+                                                if (ph.bankName) return <span className="text-[10px] text-blue-600 italic">via {ph.bankName}</span>;
+                                                return null;
+                                            })()}
                                         </div>
                                         <span className="font-medium text-green-600">{formatIDR(ph.amount)}</span>
                                     </div>
@@ -2414,7 +2947,23 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                         className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                         placeholder="0 jika tempo"
                                         value={purchaseForm.paid}
-                                        onChange={e => setPurchaseForm({ ...purchaseForm, paid: numericInput(e.target.value) })}
+                                        onChange={e => {
+                                            const val = numericInput(e.target.value);
+                                            const numVal = parseFloat(val) || 0;
+
+                                            let total = 0;
+                                            if (purchaseMode === 'items') {
+                                                total = purchaseItems.reduce((sum, i) => sum + (i.qty * i.price), 0);
+                                            } else {
+                                                total = parseFloat(purchaseForm.amount.replace(/[^0-9]/g, '')) || 0;
+                                            }
+
+                                            if (numVal > total) {
+                                                alert(`Nominal dibayar tidak boleh melebihi Total Belanja (${formatIDR(total)})`);
+                                                return;
+                                            }
+                                            setPurchaseForm({ ...purchaseForm, paid: val });
+                                        }}
                                     />
                                     <p className="text-xs text-slate-500 mt-1">Sisa akan dicatat sebagai utang supplier.</p>
                                 </div>
@@ -2495,6 +3044,49 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                            <div className="mt-4">
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Catatan Retur (Kondisi Fisik, Alasan, dll)</label>
+                                <textarea
+                                    className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                    rows={2}
+                                    placeholder="Contoh: Barang rusak, kemasan penyok..."
+                                    value={returnTxNote}
+                                    onChange={e => setReturnTxNote(e.target.value)}
+                                />
+                            </div>
+                            {/* Payment Method Selection */}
+                            <div className="mt-6 pt-4 border-t border-slate-100">
+                                <label className="block text-sm font-medium text-slate-700 mb-2">Metode Pengembalian Dana</label>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <select
+                                            className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                            value={returnTxMethod}
+                                            onChange={e => {
+                                                setReturnTxMethod(e.target.value as PaymentMethod);
+                                                setReturnTxBankId('');
+                                            }}
+                                        >
+                                            <option value={PaymentMethod.CASH}>Tunai</option>
+                                            <option value={PaymentMethod.TRANSFER}>Transfer</option>
+                                        </select>
+                                    </div>
+                                    {returnTxMethod === PaymentMethod.TRANSFER && (
+                                        <div>
+                                            <select
+                                                className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                                value={returnTxBankId}
+                                                onChange={e => setReturnTxBankId(e.target.value)}
+                                            >
+                                                <option value="">-- Pilih Bank --</option>
+                                                {banks.sort((a, b) => a.bankName.localeCompare(b.bankName)).map(b => (
+                                                    <option key={b.id} value={b.id}>{b.bankName} - {b.accountNumber}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <div className="mt-6 p-4 bg-red-50 rounded-xl flex justify-between items-center">
                                 <span className="text-red-800 font-medium">Total Refund</span>
@@ -2589,6 +3181,17 @@ export const Finance: React.FC<FinanceProps> = ({ currentUser, defaultTab = 'his
                                     </div>
                                 </div>
                             )}
+
+                            <div className="mt-4">
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Catatan Retur (Kondisi Fisik, Alasan, dll)</label>
+                                <textarea
+                                    className="w-full border border-slate-300 p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                    rows={2}
+                                    placeholder="Contoh: Barang rusak, kemasan penyok..."
+                                    value={returnPurchaseNote}
+                                    onChange={e => setReturnPurchaseNote(e.target.value)}
+                                />
+                            </div>
 
                             {/* Payment Method Selection */}
                             <div className="mt-6 pt-4 border-t border-slate-100">

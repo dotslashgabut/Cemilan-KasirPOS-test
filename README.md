@@ -1,10 +1,10 @@
-# Cemilan KasirPOS Nusantara - Testing
+# Cemilan KasirPOS Nusantara
 
 ![Static Badge](https://img.shields.io/badge/build-passing-green?style=for-the-badge)
 
 **Bug:** Unknown
 
-**🍬 Cemilan KasirPOS Nusantara - Testing**
+**🍬 Cemilan KasirPOS Nusantara**
 
 - **Frontend Framework**: [React 19](https://react.dev/)
 - **Build Tool**: [Vite](https://vitejs.dev/)
@@ -12,8 +12,8 @@
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)
 - **Icons**: [Lucide React](https://lucide.dev/)
 - **Charts**: [Recharts](https://recharts.org/)
-- **Backend**: [Node.js (Express)](https://nodejs.org/)
-- **Database**: [MySQL (Sequelize ORM)](https://www.mysql.com/)
+- **Backend**: [Node.js (Express)](./README_NODEJS_BACKEND.md)
+- **Database**: [MySQL](https://www.mysql.com/)
 
 Dibuat dengan bantuan [Google AI Studio App](https://aistudio.google.com/apps), [Google Antigravity](https://antigravity.google/), Agent model: Gemini 3 Pro dan Claude Sonnet 4.5
 
@@ -33,7 +33,7 @@ Fitur AI di aplikasi ini yang menggunakan Gemini API, kami belum sempat mencoban
 
 ## 📃 Panduan singkat instalasi dan penggunaan aplikasi Cemilan KasirPOS
 
-Aplikasi ini dirilis dalam dua file arsip berbeda. Untuk file arsip dengan nama 'full', itu sudah termasuk node module yang diperlukan, siap pakai. Sedangkan untuk file arsip dengan nama 'test', belum termasuk node modul, file-filenya sama seperti yang ada di repository, diperlukan penginstalan modul-modulnya.
+Aplikasi ini dirilis dalam dua file arsip berbeda. Untuk file arsip dengan nama 'full', itu sudah termasuk node module yang diperlukan, siap pakai. Sedangkan untuk file arsip tanpa nama 'full', belum termasuk node modul, file-filenya sama seperti yang ada di repository, diperlukan penginstalan modul-modulnya.
 
 Panduan instalasi dan penggunaan untuk Development, selengkapnya bisa dibaca di **[README_DEVELOPMENT.md](./README_DEVELOPMENT.md)**, dan untuk Production bisa dibaca di **[README_PRODUCTION.md](./README_PRODUCTION.md)**
 
@@ -94,7 +94,7 @@ Cemilan KasirPOS is a modern, feature-rich Point of Sale (POS) application desig
 - **Icons**: [Lucide React](https://lucide.dev/)
 - **Charts**: [Recharts](https://recharts.org/)
 - **Backend**: Node.js (Express)
-- **Database**: MySQL (Sequelize ORM)
+- **Database**: MySQL
 
 ## 💾 Data Persistence
 
@@ -123,9 +123,9 @@ This application uses **MySQL** as the primary database for robust data storage,
                    │ REST API
                    │
 ┌──────────────────▼──────────────────────────────┐
-│            Backend Server (Node.js)             │
+│           Backend Server (Node.js)              │
 │  - API Endpoints (server/)                      │
-│  - Express & Sequelize                          │
+│  - Express.js & Sequelize                       │
 └──────────────────┬──────────────────────────────┘
                    │ SQL
                    │
@@ -159,51 +159,42 @@ The application uses the following tables:
 ### Prerequisites
 
 * **Node.js**: Version 18 or higher.
-
 * **MySQL**: Ensure MySQL server is installed and running.
   
   ### 1. Database Setup
-1. Create a new MySQL database (e.g., `cemilan_db`).
-
-2. Import the schema from `cemilankasirpos.sql` (optional, as Sequelize will sync tables, but good for initial structure).
+1. Create a new MySQL database (e.g., `cemilankasirpos`).
+2. Import the schema from `cemilankasirpos_php.sql` (optional, as Sequelize will sync tables, but good for initial structure).
    
    ### 2. Backend Setup (Node.js)
 
-3. Navigate to the server directory:
-   
-   ```bash
-   cd server
-   ```
+3.  **Navigate to Server Directory**:
+    ```bash
+    cd server
+    ```
 
-4. Install dependencies:
-   
-   ```bash
-   npm install
-   ```
+4.  **Install Dependencies**:
+    ```bash
+    npm install
+    ```
 
-5. Configure Environment Variables:
-   
-   * Create a `.env` file in the `server/` directory.
-   
-   * Add the following configuration (adjust to your local setup):
-     
-     ```env
-     DB_HOST=localhost
-     DB_USER=root
-     DB_PASS=
-     DB_NAME=cemilan_db
-     JWT_SECRET=your_super_secret_jwt_key_change_this
-     PORT=3001
-     ```
+5.  **Configure Environment**:
+    *   Create a `.env` file in the `server` directory.
+    *   Add your database credentials:
+        ```env
+        DB_NAME=cemilankasirpos
+        DB_USER=root
+        DB_PASS=
+        DB_HOST=localhost
+        PORT=3001
+        JWT_SECRET=your_secret_key
+        ```
 
-6. Start the Backend Server:
-   
-   ```bash
-   npm start
-   ```
-   
-   * The server will run on `http://localhost:3001`.
-   * It will automatically sync the database tables.
+6.  **Start Backend Server**:
+    ```bash
+    npm start
+    ```
+    *   Server will run on `http://localhost:3001`.
+
    
    ### 3. Frontend Setup (React)
 
@@ -215,13 +206,20 @@ The application uses the following tables:
    npm install
    ```
 
-9. Start the Frontend Application:
+9. **Configure Environment**:
+   * Create a `.env` file in the root directory.
+   * Add the backend URL:
+     ```env
+     VITE_API_URL=http://localhost:3001/api
+     ```
+
+10. Start the Frontend Application:
    
    ```bash
    npm run dev
    ```
 
-10. Open your browser and visit `http://localhost:5173` (or the URL shown in the terminal).
+11. Open your browser and visit `http://localhost:5173` (or the URL shown in the terminal).
 
 See [README_DEVELOPMENT.md](./README_DEVELOPMENT.md) for detailed setup instructions.
 
@@ -239,7 +237,7 @@ See [README_DEVELOPMENT.md](./README_DEVELOPMENT.md) for detailed setup instruct
 ├── App.tsx       # Main application component
 ├── index.tsx     # Entry point
 ├── vite.config.ts
-└── cemilankasirpos.sql # Database schema
+└── cemilankasirpos_php.sql # Database schema
 ```
 
 ## 👥 User Roles
@@ -276,11 +274,11 @@ This application can be deployed in various ways:
 
 ### 📖 Available Guides:
 
-1. **[Development Guide](./README_DEVELOPMENT.md)** - Panduan untuk setup lingkungan pengembangan (development environment) untuk aplikasi Cemilan KasirPOS menggunakan Backend Node.js (Express + Sequelize)
-2. **[Production Guide](./README_PRODUCTION.md)** - Langkah-langkah persiapan sebelum build (build preparation) dan konfigurasi untuk deployment aplikasi ke server produksi (live server) menggunakan Backend Node.js
-3. **[cPanel Hosting Guide](./README_CPANEL_HOSTING.md)** - Panduan deploy ke shared hosting menggunakan cPanel
-4. **[Docker Deployment](./README_DOCKER.md)** - Panduan menjalankan aplikasi menggunakan Docker dan Docker Compose
-5. **[Production & CORS Guide](./README_PRODUCTION.md)** - Langkah-langkah detail build dan konfigurasi CORS
+1. **[Development Guide](./README_DEVELOPMENT.md)** - Panduan untuk setup lingkungan pengembangan (development environment) untuk aplikasi Cemilan KasirPOS menggunakan Backend Node.js
+2. **[Production Guide](./README_PRODUCTION.md)** - Langkah-langkah persiapan sebelum build (build preparation) dan konfigurasi untuk deployment aplikasi ke server produksi (live server)
+3. **[Panduan Hosting cPanel](./README_CPANEL_HOSTING.md)** - Panduan deploy ke shared hosting menggunakan cPanel (Node.js App)
+4. **[Panduan Run Locally (Universal)](./README_RUN_LOCALLY.md)** - Panduan menjalankan aplikasi di lokal
+5. **[Docker Deployment](./README_DOCKER.md)** - Panduan menjalankan aplikasi menggunakan Docker dan Docker Compose
 
 ## 📝 License
 
@@ -354,7 +352,7 @@ Cemilan KasirPOS adalah aplikasi Point of Sale (POS) modern yang kaya fitur, dir
 - **Ikon**: [Lucide React](https://lucide.dev/)
 - **Grafik**: [Recharts](https://recharts.org/)
 - **Backend**: Node.js (Express)
-- **Database**: MySQL (Sequelize ORM)
+- **Database**: MySQL
 
 ## 💾 Penyimpanan Data
 
@@ -385,7 +383,7 @@ Aplikasi ini menggunakan **MySQL** sebagai database utama untuk penyimpanan data
 ┌──────────────────▼──────────────────────────────┐
 │           Backend Server (Node.js)              │
 │  - Endpoint API (server/)                       │
-│  - Express & Sequelize                          │
+│  - Express.js & Sequelize                       │
 └──────────────────┬──────────────────────────────┘
                    │ SQL
                    │
@@ -405,14 +403,6 @@ Aplikasi ini menggunakan **MySQL** sebagai database utama untuk penyimpanan data
    npm install
    ```
 
-3. **Install Dependensi Backend**:
-   
-   ```bash
-   cd server
-   npm install
-   cd ..
-   ```
-
 ## ▶️ Menjalankan Aplikasi
 
 Untuk memulai lingkungan pengembangan:
@@ -420,13 +410,17 @@ Untuk memulai lingkungan pengembangan:
 1. **Jalankan Server Backend**:
    
    * Pastikan server MySQL Anda berjalan.
-   
    * Masuk ke direktori server:
      
      ```bash
      cd server
      ```
    
+   * Install dependensi (jika belum):
+     ```bash
+     npm install
+     ```
+
    * Jalankan server:
      
      ```bash
@@ -449,11 +443,11 @@ Aplikasi ini dapat di-deploy dengan berbagai cara:
 
 ### 📖 Panduan yang Tersedia:
 
-1. **[Development Guide](./README_DEVELOPMENT.md)** - Panduan untuk setup lingkungan pengembangan (development environment) untuk aplikasi Cemilan KasirPOS menggunakan Backend Node.js (Express + Sequelize)
-2. **[Production Guide](./README_PRODUCTION.md)** - Langkah-langkah persiapan sebelum build (build preparation) dan konfigurasi untuk deployment aplikasi ke server produksi (live server) menggunakan Backend Node.js
-3. **[Panduan Hosting cPanel](./README_CPANEL_HOSTING.md)** - Deploy ke shared hosting dengan cPanel
-4. **[Deployment Docker](./README_DOCKER.md)** - Jalankan dengan Docker dan Docker Compose
-5. **[Production & CORS Guide](./README_PRODUCTION.md)** - Detil build dan tahap konfigurasi CORS
+1. **[Development Guide](./README_DEVELOPMENT.md)** - Panduan untuk setup lingkungan pengembangan (development environment) untuk aplikasi Cemilan KasirPOS menggunakan Backend Node.js
+2. **[Production Guide](./README_PRODUCTION.md)** - Langkah-langkah persiapan sebelum build (build preparation) dan konfigurasi untuk deployment aplikasi ke server produksi (live server)
+3. **[Panduan Hosting cPanel](./README_CPANEL_HOSTING.md)** - Deploy ke shared hosting dengan cPanel (Node.js App)
+4. **[Panduan Run Locally (Universal)](./README_RUN_LOCALLY.md)** - Panduan menjalankan aplikasi di lokal
+5. **[Deployment Docker](./README_DOCKER.md)** - Jalankan dengan Docker dan Docker Compose
 
 ## 📝 Lisensi
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Search, Trash2, User, Plus, Minus, ShoppingBag, Printer, CreditCard, Banknote, Clock, ScanLine, StickyNote, Image as ImageIcon } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Search, Trash2, User, Plus, Minus, ShoppingBag, Printer, CreditCard, Banknote, Clock, ScanLine, StickyNote, Image as ImageIcon, X } from 'lucide-react';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
 import { Product, CartItem, PriceType, PaymentStatus, Transaction, PaymentMethod, User as UserType, Customer, StoreSettings, BankAccount, CashFlowType } from '../types';
@@ -154,6 +155,9 @@ export const POS: React.FC = () => {
     // Validation
     if (paymentMethod === PaymentMethod.TEMPO && paid === 0) {
       paid = 0;
+    } else if (paymentMethod === PaymentMethod.TEMPO && paid > totalAmount) {
+      alert('Peringatan: Jumlah pembayaran tidak boleh melebihi total harga barang untuk metode pembayaran tempo!');
+      return;
     } else if (paymentMethod !== PaymentMethod.TEMPO && paid < totalAmount) {
       alert('Pembayaran kurang!');
       return;
@@ -222,7 +226,7 @@ export const POS: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-6rem)] gap-6">
+    <div className="flex flex-col lg:flex-row h-[calc(100vh-6rem)] gap-6 animate-fade-in">
       {/* Product Grid */}
       <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex gap-4 bg-white z-10">
@@ -232,11 +236,23 @@ export const POS: React.FC = () => {
               ref={searchInputRef}
               type="text"
               placeholder="Scan Barcode atau Cari Nama..."
-              className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-20 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={handleSearchKeyDown}
             />
+            {search && (
+              <button
+                onClick={() => {
+                  setSearch('');
+                  searchInputRef.current?.focus();
+                }}
+                className="absolute right-10 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-1 hover:bg-slate-200 rounded"
+                title="Hapus pencarian"
+              >
+                <X size={16} />
+              </button>
+            )}
             <ScanLine className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           </div>
           <select
@@ -293,13 +309,24 @@ export const POS: React.FC = () => {
       <div className="w-full lg:w-96 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col">
         <div className="p-4 border-b border-slate-100 bg-slate-50 rounded-t-2xl">
           <div className="mb-3">
-            <input
-              type="text"
-              placeholder="Cari nama pelanggan..."
-              className="w-full px-3 py-2 mb-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={customerSearch}
-              onChange={(e) => setCustomerSearch(e.target.value)}
-            />
+            <div className="relative mb-2">
+              <input
+                type="text"
+                placeholder="Cari nama pelanggan..."
+                className="w-full px-3 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+              />
+              {customerSearch && (
+                <button
+                  onClick={() => setCustomerSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-1 hover:bg-slate-100 rounded"
+                  title="Hapus pencarian"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <User size={18} className="text-slate-400" />
               <select
@@ -366,8 +393,38 @@ export const POS: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2 bg-slate-50 rounded-lg border border-slate-200">
                     <button onClick={() => item.qty > 1 ? updateCartItem(idx, { qty: item.qty - 1 }) : removeFromCart(idx)} className="p-1 hover:bg-slate-200 rounded text-slate-500"><Minus size={14} /></button>
-                    <span className="text-sm font-bold w-6 text-center">{item.qty}</span>
-                    <button onClick={() => updateCartItem(idx, { qty: item.qty + 1 })} className="p-1 hover:bg-slate-200 rounded text-slate-500"><Plus size={14} /></button>
+                    <input
+                      type="text"
+                      className="text-sm font-bold w-12 text-center bg-transparent outline-none p-0"
+                      value={item.qty === 0 ? '' : item.qty}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, '');
+                        if (val === '') {
+                          updateCartItem(idx, { qty: 0 });
+                          return;
+                        }
+                        let newQty = parseInt(val);
+                        if (newQty > item.stock) {
+                          alert('Jumlah melebihi stok, isi sesuai ketersediaan stok');
+                          newQty = item.stock;
+                        }
+                        updateCartItem(idx, { qty: newQty });
+                      }}
+                      onBlur={() => {
+                        if (item.qty === 0) updateCartItem(idx, { qty: 1 });
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (item.qty < item.stock) {
+                          updateCartItem(idx, { qty: item.qty + 1 });
+                        }
+                      }}
+                      className={`p-1 rounded ${item.qty >= item.stock ? 'text-slate-300 cursor-not-allowed' : 'hover:bg-slate-200 text-slate-500'}`}
+                      disabled={item.qty >= item.stock}
+                    >
+                      <Plus size={14} />
+                    </button>
                   </div>
                   {/* Delete Item Button */}
                   <button
@@ -400,7 +457,7 @@ export const POS: React.FC = () => {
       </div>
 
       {/* Payment Modal */}
-      {showPaymentModal && (
+      {showPaymentModal && createPortal(
         <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 bg-black/40 backdrop-blur-md z-[9999] flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="bg-slate-900 p-6 text-white shrink-0">
@@ -478,6 +535,14 @@ export const POS: React.FC = () => {
                     autoFocus
                   />
                 </div>
+                {/* Warning for Tempo payment if amount exceeds total */}
+                {paymentMethod === PaymentMethod.TEMPO && parseFloat(amountPaid) > totalAmount && (
+                  <div className="mt-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                    <p className="text-xs text-red-600 font-medium flex items-center gap-1">
+                      <span className="font-bold">⚠</span> Peringatan: Jumlah yang diterima melebihi total tagihan!
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Notes */}
@@ -519,7 +584,8 @@ export const POS: React.FC = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

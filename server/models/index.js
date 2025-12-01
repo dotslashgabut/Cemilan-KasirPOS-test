@@ -56,7 +56,9 @@ const Transaction = sequelize.define('Transaction', {
     customerName: { type: DataTypes.STRING },
     cashierId: { type: DataTypes.STRING },
     cashierName: { type: DataTypes.STRING },
-    paymentHistory: { type: DataTypes.JSON }
+    paymentHistory: { type: DataTypes.JSON },
+    isReturned: { type: DataTypes.BOOLEAN, defaultValue: false },
+    returnNote: { type: DataTypes.TEXT }
 });
 
 const Purchase = sequelize.define('Purchase', {
@@ -74,7 +76,11 @@ const Purchase = sequelize.define('Purchase', {
     paymentMethod: { type: DataTypes.STRING },
     bankId: { type: DataTypes.STRING },
     bankName: { type: DataTypes.STRING },
-    paymentHistory: { type: DataTypes.JSON }
+    paymentHistory: { type: DataTypes.JSON },
+    isReturned: { type: DataTypes.BOOLEAN, defaultValue: false },
+    returnNote: { type: DataTypes.TEXT },
+    userId: { type: DataTypes.STRING },
+    userName: { type: DataTypes.STRING }
 });
 
 const CashFlow = sequelize.define('CashFlow', {
@@ -87,7 +93,9 @@ const CashFlow = sequelize.define('CashFlow', {
     paymentMethod: { type: DataTypes.STRING },
     bankId: { type: DataTypes.STRING },
     bankName: { type: DataTypes.STRING },
-    referenceId: { type: DataTypes.STRING } // To link with Transaction or Purchase ID
+    referenceId: { type: DataTypes.STRING }, // To link with Transaction or Purchase ID
+    userId: { type: DataTypes.STRING },
+    userName: { type: DataTypes.STRING }
 });
 
 const User = sequelize.define('User', {

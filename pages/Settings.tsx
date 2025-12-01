@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useData } from '../hooks/useData';
 import { StorageService } from '../services/storage';
 import { User, UserRole, StoreSettings, BankAccount, PrinterType } from '../types';
-import { Trash2, Plus, User as UserIcon, Shield, ShieldAlert, Edit2, Save, X, Store, Upload, CreditCard, Printer, AlertTriangle, Download } from 'lucide-react';
+import { Trash2, Plus, User as UserIcon, Shield, ShieldAlert, Edit2, Save, X, Store, Upload, CreditCard, Printer, AlertTriangle, Download, FileSpreadsheet, Settings as SettingsIcon } from 'lucide-react';
+import { exportToCSV } from '../utils';
+import * as XLSX from 'xlsx';
 
 // Default store settings - defined outside component to avoid recreation
 const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -78,6 +81,84 @@ export const Settings: React.FC = () => {
         if (confirm('Hapus data bank/e-wallet ini?')) {
             await StorageService.deleteBank(id);
         }
+    };
+
+    const handleExportBankCSV = () => {
+        const headers = ['ID', 'Nama Bank/E-Wallet', 'Nomor Rekening', 'Atas Nama'];
+        const rows = banks.map(b => [b.id, b.bankName, b.accountNumber, b.holderName]);
+        exportToCSV('data-bank.csv', headers, rows);
+    };
+
+    const handleExportBankExcel = () => {
+        const data = banks.map(b => ({
+            'ID': b.id,
+            'Nama Bank/E-Wallet': b.bankName,
+            'Nomor Rekening': b.accountNumber,
+            'Atas Nama': b.holderName
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Data Bank");
+
+        // Auto-width
+        worksheet['!cols'] = [
+            { wch: 15 }, // ID
+            { wch: 20 }, // Nama Bank
+            { wch: 20 }, // No Rek
+            { wch: 20 }  // Atas Nama
+        ];
+
+        XLSX.writeFile(workbook, `Data_Bank_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
+    const handlePrintBank = () => {
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const rows = banks.map((b, idx) => `
+            <tr>
+                <td>${idx + 1}</td>
+                <td>${b.bankName}</td>
+                <td>${b.accountNumber}</td>
+                <td>${b.holderName}</td>
+            </tr>
+        `).join('');
+
+        const html = `
+            <html>
+                <head>
+                    <title>Data Bank & E-Wallet</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
+                        h2 { text-align: center; margin-bottom: 20px; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                        th { background-color: #f2f2f2; font-weight: bold; }
+                    </style>
+                </head>
+                <body>
+                    <h2>Data Bank & E-Wallet</h2>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 40px">No</th>
+                                <th>Nama Bank/E-Wallet</th>
+                                <th>Nomor Rekening</th>
+                                <th>Atas Nama</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows}
+                        </tbody>
+                    </table>
+                    <script>window.print();</script>
+                </body>
+            </html>
+        `;
+
+        printWindow.document.write(html);
+        printWindow.document.close();
     };
 
     // --- USER MANAGEMENT HANDLERS ---
@@ -268,10 +349,13 @@ export const Settings: React.FC = () => {
 
 
     return (
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-5xl mx-auto animate-fade-in">
             <div className="mb-8">
-                <h2 className="text-2xl font-bold text-slate-900">Pengaturan</h2>
-                <p className="text-slate-500">Kelola profil toko, metode pembayaran, dan akses pengguna.</p>
+                <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                    <SettingsIcon className="text-slate-600" />
+                    Pengaturan
+                </h2>
+                <p className="text-slate-500 mt-1">Kelola profil toko, metode pembayaran, dan akses pengguna.</p>
             </div>
 
             <div className="flex gap-4 mb-6 border-b border-slate-200 overflow-x-auto">
@@ -413,6 +497,17 @@ export const Settings: React.FC = () => {
                             <Plus size={18} /> Tambah Rekening
                         </button>
                     </div>
+                    <div className="flex justify-end gap-2 mb-4">
+                        <button onClick={handlePrintBank} className="bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-2 hover:bg-slate-50 text-sm font-medium">
+                            <Printer size={16} /> Print
+                        </button>
+                        <button onClick={handleExportBankExcel} className="bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded-lg flex items-center gap-2 hover:bg-green-100 text-sm font-medium">
+                            <FileSpreadsheet size={16} /> Excel
+                        </button>
+                        <button onClick={handleExportBankCSV} className="bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-lg flex items-center gap-2 hover:bg-slate-50 text-sm font-medium">
+                            <Download size={16} /> CSV
+                        </button>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {banks.map(bank => (
                             <div key={bank.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 transition-colors group">
@@ -439,8 +534,8 @@ export const Settings: React.FC = () => {
                     </div>
 
                     {/* Bank Modal */}
-                    {isBankModalOpen && (
-                        <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 bg-black/40 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 overflow-y-auto">
+                    {isBankModalOpen && createPortal(
+                        <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 bg-black/40 backdrop-blur-md z-[99999] flex items-center justify-center p-4 overflow-y-auto">
                             <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-xl">
                                 <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                                     <h3 className="font-bold text-slate-800">{editingBankId ? 'Edit Rekening' : 'Tambah Rekening'}</h3>
@@ -467,7 +562,8 @@ export const Settings: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        </div>,
+                        document.body
                     )}
                 </div>
             )
@@ -723,7 +819,7 @@ export const Settings: React.FC = () => {
 
             {/* User Modal */}
             {
-                isModalOpen && (
+                isModalOpen && createPortal(
                     <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 bg-black/40 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 overflow-y-auto">
                         <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-xl">
                             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
@@ -772,7 +868,8 @@ export const Settings: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </div>,
+                    document.body
                 )
             }
         </div >

@@ -2,7 +2,7 @@ import { Product, Transaction, User, CashFlow, Category, Customer, Supplier, Pur
 import { generateUUID, toMySQLDate } from "../utils";
 
 const isProd = import.meta.env.PROD;
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost/php_server/api';
 
 // Get headers with authentication
 const getHeaders = () => {
@@ -575,6 +575,58 @@ export const ApiService = {
 
         if (purchase) {
             const parsedPurchase = parsePurchase(purchase);
+
+            // --- LOGIC A: RESTORE DEBT (If deleting a RETURN purchase) ---
+            if (parsedPurchase.type === 'RETURN' && parsedPurchase.originalPurchaseId) {
+                try {
+                    const originalPurchaseRaw = purchases.find((p: any) => p.id === parsedPurchase.originalPurchaseId);
+
+                    if (originalPurchaseRaw) {
+                        const originalPurchase = parsePurchase(originalPurchaseRaw);
+
+                        // Find "Potong Utang" entry in payment history
+                        if (originalPurchase.paymentHistory && originalPurchase.paymentHistory.length > 0) {
+                            // Match by approximate time (within 5s) or exact date string
+                            const historyIndex = originalPurchase.paymentHistory.findIndex(ph =>
+                                ph.note?.includes('Potong Utang') &&
+                                (ph.date === parsedPurchase.date || Math.abs(new Date(ph.date).getTime() - new Date(parsedPurchase.date).getTime()) < 5000)
+                            );
+
+                            if (historyIndex !== -1) {
+                                const entryToRemove = originalPurchase.paymentHistory[historyIndex];
+                                console.log(`Reverting debt cut of ${entryToRemove.amount} from purchase ${originalPurchase.id}`);
+
+                                const newHistory = [...originalPurchase.paymentHistory];
+                                newHistory.splice(historyIndex, 1);
+
+                                const newAmountPaid = originalPurchase.amountPaid - entryToRemove.amount;
+                                const newStatus = newAmountPaid >= originalPurchase.totalAmount ? PaymentStatus.PAID :
+                                    (newAmountPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.UNPAID);
+
+                                // Check if other returns exist
+                                const otherReturns = purchases.some((p: any) =>
+                                    p.type === 'RETURN' &&
+                                    p.originalPurchaseId === originalPurchase.id &&
+                                    p.id !== parsedPurchase.id
+                                );
+
+                                const updatedOriginalPurchase = {
+                                    ...originalPurchase,
+                                    amountPaid: newAmountPaid,
+                                    paymentStatus: newStatus,
+                                    paymentHistory: newHistory,
+                                    isReturned: otherReturns
+                                };
+
+                                await ApiService.updatePurchase(updatedOriginalPurchase);
+                                console.log("Original purchase debt restored successfully.");
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error("Failed to restore original purchase debt:", error);
+                }
+            }
             // Revert Stock
             if (parsedPurchase.items && parsedPurchase.items.length > 0) {
                 const isReturn = parsedPurchase.type === 'RETURN';
@@ -630,6 +682,10 @@ export const ApiService = {
             body: JSON.stringify({ ...cf, id: cf.id || generateUUID(), date: formattedDate })
         });
         if (!res.ok) throw new Error('Failed to add cashflow');
+    },
+    deleteCashFlow: async (id: string) => {
+        const res = await fetch(`${API_URL}/cashflow/${id}`, { method: 'DELETE', headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed to delete cashflow');
     },
 
     // Users

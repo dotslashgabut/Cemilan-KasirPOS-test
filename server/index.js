@@ -126,10 +126,25 @@ const createCrudRoutes = (modelName) => {
 
     router.get('/', authenticateToken, async (req, res) => {
         try {
+            // RBAC: Only SUPERADMIN can view user list
+            if (modelName === 'User' && req.user.role !== 'SUPERADMIN') {
+                return res.status(403).json({ error: 'Access denied' });
+            }
+
             const options = {};
             if (modelName === 'User') {
                 options.attributes = { exclude: ['password'] };
             }
+
+            // Filter for Cashier: Only show their own financial data
+            if (req.user.role === 'CASHIER') {
+                if (modelName === 'Transaction') {
+                    options.where = { cashierId: req.user.id };
+                } else if (modelName === 'Purchase' || modelName === 'CashFlow') {
+                    options.where = { userId: req.user.id };
+                }
+            }
+
             const items = await Model.findAll(options);
             res.json(items);
         } catch (error) {
@@ -140,12 +155,46 @@ const createCrudRoutes = (modelName) => {
 
     router.get('/:id', authenticateToken, async (req, res) => {
         try {
+            // RBAC: Only SUPERADMIN can view user details (except self)
+            if (modelName === 'User' && req.user.role !== 'SUPERADMIN') {
+                if (req.params.id !== req.user.id) {
+                    return res.status(403).json({ error: 'Access denied' });
+                }
+            }
+
             const options = {};
             if (modelName === 'User') {
                 options.attributes = { exclude: ['password'] };
             }
+
+            // Filter for Cashier
+            if (req.user.role === 'CASHIER') {
+                options.where = options.where || {};
+                if (modelName === 'Transaction') {
+                    options.where.cashierId = req.user.id;
+                } else if (modelName === 'Purchase' || modelName === 'CashFlow') {
+                    options.where.userId = req.user.id;
+                }
+            }
+
             const item = await Model.findByPk(req.params.id, options);
-            if (item) res.json(item);
+
+            // If filtering by where clause in findByPk (which might not work directly for some sequelize versions without 'where'), 
+            // we might need findOne. findByPk usually takes id and options. 
+            // If options has 'where', it might conflict or be ignored depending on version.
+            // Safer to use findOne if we have extra conditions.
+            let foundItem = item;
+            if (req.user.role === 'CASHIER' && (modelName === 'Transaction' || modelName === 'Purchase' || modelName === 'CashFlow')) {
+                foundItem = await Model.findOne({
+                    where: {
+                        id: req.params.id,
+                        ...options.where
+                    },
+                    ...options
+                });
+            }
+
+            if (foundItem) res.json(foundItem);
             else res.status(404).json({ error: 'Not found' });
         } catch (error) {
             res.status(500).json({ error: getSafeError(error) });
@@ -154,6 +203,19 @@ const createCrudRoutes = (modelName) => {
 
     router.post('/', authenticateToken, async (req, res) => {
         try {
+            // RBAC: Only SUPERADMIN can create users
+            if (modelName === 'User' && req.user.role !== 'SUPERADMIN') {
+                return res.status(403).json({ error: 'Access denied' });
+            }
+
+            // RBAC: Cashiers cannot create master data
+            if (req.user.role === 'CASHIER') {
+                const restrictedModels = ['Product', 'Category', 'Customer', 'Supplier', 'User', 'StoreSettings'];
+                if (restrictedModels.includes(modelName)) {
+                    return res.status(403).json({ error: 'Access denied. Cashiers can only process transactions.' });
+                }
+            }
+
             // Hash password for User model
             if (modelName === 'User' && req.body.password) {
                 req.body.password = await bcrypt.hash(req.body.password, 10);
@@ -174,6 +236,19 @@ const createCrudRoutes = (modelName) => {
 
     router.put('/:id', authenticateToken, async (req, res) => {
         try {
+            // RBAC: Only SUPERADMIN can update users
+            if (modelName === 'User' && req.user.role !== 'SUPERADMIN') {
+                return res.status(403).json({ error: 'Access denied' });
+            }
+
+            // RBAC: Cashiers cannot modify master data
+            if (req.user.role === 'CASHIER') {
+                const restrictedModels = ['Product', 'Category', 'Customer', 'Supplier', 'User', 'StoreSettings'];
+                if (restrictedModels.includes(modelName)) {
+                    return res.status(403).json({ error: 'Access denied. Cashiers can only process transactions.' });
+                }
+            }
+
             // Hash password for User model
             if (modelName === 'User' && req.body.password) {
                 req.body.password = await bcrypt.hash(req.body.password, 10);
@@ -212,6 +287,26 @@ const createCrudRoutes = (modelName) => {
 
     router.delete('/:id', authenticateToken, async (req, res) => {
         try {
+            // RBAC: Only SUPERADMIN can delete users
+            if (modelName === 'User' && req.user.role !== 'SUPERADMIN') {
+                return res.status(403).json({ error: 'Access denied' });
+            }
+
+            // RBAC: Only SUPERADMIN and OWNER can delete financial data
+            if (['Transaction', 'Purchase', 'CashFlow'].includes(modelName)) {
+                if (!['SUPERADMIN', 'OWNER'].includes(req.user.role)) {
+                    return res.status(403).json({ error: 'Access denied. Only Owner/Admin can delete financial data.' });
+                }
+            }
+
+            // RBAC: Cashiers cannot delete master data
+            if (req.user.role === 'CASHIER') {
+                const restrictedModels = ['Product', 'Category', 'Customer', 'Supplier', 'User', 'StoreSettings', 'BankAccount'];
+                if (restrictedModels.includes(modelName)) {
+                    return res.status(403).json({ error: 'Access denied. Cashiers cannot delete data.' });
+                }
+            }
+
             const deleted = await Model.destroy({
                 where: { id: req.params.id }
             });
@@ -228,6 +323,14 @@ const createCrudRoutes = (modelName) => {
     // Batch insert/upsert for migration/sync
     router.post('/batch', authenticateToken, async (req, res) => {
         try {
+            // RBAC: Cashiers cannot perform batch operations on restricted resources
+            if (req.user.role === 'CASHIER') {
+                const restrictedModels = ['Product', 'Category', 'Customer', 'Supplier', 'User', 'StoreSettings'];
+                if (restrictedModels.includes(modelName)) {
+                    return res.status(403).json({ error: 'Access denied. Cashiers cannot perform batch operations on this resource.' });
+                }
+            }
+
             const items = req.body;
             if (!Array.isArray(items)) {
                 return res.status(400).json({ error: 'Body must be an array' });
@@ -261,6 +364,12 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
         const CashFlow = models.CashFlow;
 
         // 1. Create Transaction
+        // Auto-fill cashier info if available
+        if (req.user) {
+            if (!txData.cashierId) txData.cashierId = req.user.id;
+            if (!txData.cashierName) txData.cashierName = req.user.username; // Or req.user.name if available
+        }
+
         const transaction = await Transaction.create(txData, { transaction: t });
 
         // 2. Update Stock
@@ -293,7 +402,14 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
                 // If we received 50k and gave 40k change, actual Cash In is 10k
                 const paid = parseFloat(txData.amountPaid) || 0;
                 const change = parseFloat(txData.change) || 0;
-                cfAmount = paid - change;
+                
+                // Fix: If change is negative (partial payment/debt), do not subtract it.
+                // Cash flow should be exactly what was paid.
+                if (change < 0) {
+                    cfAmount = paid;
+                } else {
+                    cfAmount = paid - change;
+                }
             }
 
             if (cfAmount > 0) {
@@ -313,7 +429,9 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
                     paymentMethod: txData.paymentMethod,
                     bankId: txData.bankId,
                     bankName: txData.bankName,
-                    referenceId: txData.id
+                    referenceId: txData.id,
+                    userId: req.user ? req.user.id : null,
+                    userName: req.user ? req.user.username : null
                 }, { transaction: t });
             }
         }
@@ -337,6 +455,12 @@ app.post('/api/purchases', authenticateToken, async (req, res) => {
         const CashFlow = models.CashFlow;
 
         // 1. Create Purchase
+        // Auto-fill user info if available
+        if (req.user) {
+            purchaseData.userId = req.user.id;
+            purchaseData.userName = req.user.username; // Or req.user.name
+        }
+
         const purchase = await Purchase.create(purchaseData, { transaction: t });
 
         // 2. Update Stock
@@ -377,7 +501,9 @@ app.post('/api/purchases', authenticateToken, async (req, res) => {
                     paymentMethod: purchaseData.paymentMethod,
                     bankId: purchaseData.bankId,
                     bankName: purchaseData.bankName,
-                    referenceId: purchase.id
+                    referenceId: purchase.id,
+                    userId: req.user ? req.user.id : null,
+                    userName: req.user ? req.user.username : null
                 }, { transaction: t });
             }
         }
