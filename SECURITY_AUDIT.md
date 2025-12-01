@@ -26,9 +26,10 @@ This document outlines the security audit findings and implementation details fo
     - `.env` file is added to `.gitignore`.
     - `config/database.js` uses environment variables.
 
-### 2. Sensitive Data Exposure
+### 2. Sensitive Data Exposure & Authentication
 - **Status**: **Resolved**
 - **Implementation**: 
+    - **Strict Password Hashing**: Legacy plain-text password support has been **removed**. All passwords must be hashed with Bcrypt (starting with `$2`).
     - Password hashes are automatically excluded from API responses using Sequelize `attributes: { exclude: ['password'] }` or custom toJSON methods.
     - Error messages in production (`NODE_ENV=production`) do not leak stack traces.
 

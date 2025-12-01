@@ -84,23 +84,13 @@ app.post('/api/login', loginLimiter, async (req, res) => {
         }
 
         // Check password
-        // For migration support, we might have plain text passwords initially
-        // Ideally we should hash them if they are not hashed, but for now let's assume bcrypt or plain text check
         let validPassword = false;
         if (user.password.startsWith('$2')) {
             validPassword = await bcrypt.compare(password, user.password);
-        } else {
-            // Legacy plain text fallback (should be removed in production)
-            validPassword = user.password === password;
-            // Optional: Upgrade to hash
-            if (validPassword) {
-                const hashedPassword = await bcrypt.hash(password, 10);
-                await user.update({ password: hashedPassword });
-            }
         }
 
         if (!validPassword) {
-            return res.status(401).json({ error: 'Invalid username or password' });
+            return res.status(401).json({ error: 'Username atau password salah' });
         }
 
         const token = jwt.sign(
@@ -362,6 +352,7 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
         const Transaction = models.Transaction;
         const Product = models.Product;
         const CashFlow = models.CashFlow;
+        const BankAccount = models.BankAccount;
 
         // 1. Create Transaction
         // Auto-fill cashier info if available
@@ -402,7 +393,7 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
                 // If we received 50k and gave 40k change, actual Cash In is 10k
                 const paid = parseFloat(txData.amountPaid) || 0;
                 const change = parseFloat(txData.change) || 0;
-                
+
                 // Fix: If change is negative (partial payment/debt), do not subtract it.
                 // Cash flow should be exactly what was paid.
                 if (change < 0) {
@@ -415,9 +406,21 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
             if (cfAmount > 0) {
                 const cfType = isReturn ? 'KELUAR' : 'MASUK'; // Sale = IN, Return = OUT
                 const category = isReturn ? 'Retur Penjualan' : 'Penjualan';
+
+                let bankInfo = '';
+                if (txData.bankId) {
+                    const bank = await BankAccount.findByPk(txData.bankId, { transaction: t });
+                    if (bank) {
+                        bankInfo = ` (via ${bank.bankName} - ${bank.accountNumber})`;
+                    }
+                }
+
                 const description = isReturn
-                    ? `Refund Retur Transaksi #${txData.id.substring(0, 6)}`
-                    : `Penjualan ke ${txData.customerName || 'Umum'} (Tx: ${txData.id.substring(0, 6)})`;
+                    ? `Refund Retur Transaksi #${txData.id.substring(0, 6)}${bankInfo}`
+                    : `Penjualan ke ${txData.customerName || 'Umum'} (Tx: ${txData.id.substring(0, 6)})${bankInfo}`;
+
+                // Determine payment method for CashFlow: TRANSFER if bankId exists, otherwise CASH
+                const cfPaymentMethod = txData.bankId ? 'TRANSFER' : 'CASH';
 
                 await CashFlow.create({
                     id: Date.now().toString(), // Simple ID generation
@@ -426,7 +429,7 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
                     amount: cfAmount,
                     category: category,
                     description: description,
-                    paymentMethod: txData.paymentMethod,
+                    paymentMethod: cfPaymentMethod,
                     bankId: txData.bankId,
                     bankName: txData.bankName,
                     referenceId: txData.id,
@@ -453,6 +456,7 @@ app.post('/api/purchases', authenticateToken, async (req, res) => {
         const Purchase = models.Purchase;
         const Product = models.Product;
         const CashFlow = models.CashFlow;
+        const BankAccount = models.BankAccount;
 
         // 1. Create Purchase
         // Auto-fill user info if available
@@ -487,9 +491,21 @@ app.post('/api/purchases', authenticateToken, async (req, res) => {
             if (amount > 0) {
                 const cfType = isReturn ? 'MASUK' : 'KELUAR'; // Purchase = OUT, Return = IN (Refund)
                 const category = isReturn ? 'Retur Pembelian' : 'Pembelian Stok';
+
+                let bankInfo = '';
+                if (purchaseData.bankId) {
+                    const bank = await BankAccount.findByPk(purchaseData.bankId, { transaction: t });
+                    if (bank) {
+                        bankInfo = ` (via ${bank.bankName} - ${bank.accountNumber})`;
+                    }
+                }
+
                 const description = isReturn
-                    ? `Refund Retur Pembelian dari ${purchaseData.supplierName}`
-                    : `Pembelian dari ${purchaseData.supplierName}: ${purchaseData.description}`;
+                    ? `Refund Retur Pembelian dari ${purchaseData.supplierName}${bankInfo}`
+                    : `Pembelian dari ${purchaseData.supplierName}: ${purchaseData.description}${bankInfo}`;
+
+                // Determine payment method for CashFlow: TRANSFER if bankId exists, otherwise CASH
+                const cfPaymentMethod = purchaseData.bankId ? 'TRANSFER' : 'CASH';
 
                 await CashFlow.create({
                     id: Date.now().toString(),
@@ -498,7 +514,7 @@ app.post('/api/purchases', authenticateToken, async (req, res) => {
                     amount: amount,
                     category: category,
                     description: description,
-                    paymentMethod: purchaseData.paymentMethod,
+                    paymentMethod: cfPaymentMethod,
                     bankId: purchaseData.bankId,
                     bankName: purchaseData.bankName,
                     referenceId: purchase.id,

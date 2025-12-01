@@ -23,8 +23,8 @@
 - **Frontend**: React 19 dengan TypeScript
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS (dengan animasi custom fade-in)
-- **Backend**: Node.js (Express)
-- **Database**: MySQL
+- **Backend**: Node.js (Express) - Primary, PHP (Legacy/Backup)
+- **Database**: MySQL (Timezone: Asia/Jakarta / WIB)
 - **Authentication**: JWT (JSON Web Tokens)
 - **Security**: Bcrypt untuk enkripsi password, Helmet untuk security headers
 
@@ -36,7 +36,8 @@
 
 - **Username & Password**: Login menggunakan kredensial terenkripsi
 - **JWT Authentication**: Token berbasis JWT untuk session management
-- **Password Hashing**: Semua password dienkripsi menggunakan Bcrypt
+- **Password Hashing**: Semua password **wajib** dienkripsi menggunakan Bcrypt (Format `$2...`)
+- **Strict Security**: Tidak ada fallback untuk password plain-text (sama seperti backend PHP)
 - **Default Credentials**:
   - Username: `superadmin`
   - Password: `password` (otomatis terenkripsi saat pertama login)
@@ -152,7 +153,7 @@ OWNER:
 #### Pencarian Produk
 
 - **Search by Name**: Cari produk berdasarkan nama
-- **Clear Search**: Tombol 'x' untuk menghapus pencarian dengan cepat
+- **Clear Search**: Tombol 'x' untuk menghapus pencarian item dan pelanggan dengan cepat
 - **Barcode Scanner**: Input barcode untuk pencarian cepat
 - **Autocomplete**: Saran produk otomatis saat mengetik
 - **Filter Kategori**: Filter produk berdasarkan kategori
@@ -163,7 +164,7 @@ OWNER:
 - **Edit Qty**: Ubah jumlah item langsung dari keranjang
 - **Validasi Stok**:
   - **Plus Button**: Tombol plus (+) otomatis berhenti saat mencapai batas stok tersedia
-  - **Manual Input**: Input manual divalidasi (maks 4 digit), menampilkan peringatan "jumlah melebihi stok" jika melebihi ketersediaan
+  - **Manual Input**: Input manual divalidasi (maks 4 digit), menampilkan peringatan "jumlah melebihi stok, isi sesuai ketersediaan stok" jika melebihi ketersediaan
 - **Hapus Item**: Hapus item dari keranjang
 - **Clear Cart**: Kosongkan seluruh keranjang
 - **Real-time Total**: Hitung total otomatis saat ada perubahan
@@ -201,7 +202,7 @@ Setiap produk mendukung 4 tingkatan harga:
    
    - Catat sebagai piutang pelanggan
    - Support pembayaran sebagian (DP)
-   - **Validasi**: Jumlah pembayaran tidak boleh melebihi total tagihan/harga item
+   - **Validasi**: Jumlah pembayaran tidak boleh melebihi total tagihan/harga item (Peringatan muncul jika melebihi)
    - Cicilan dapat dilacak di riwayat transaksi
 
 #### Data Customer
@@ -323,7 +324,7 @@ Setiap produk mendukung 4 tingkatan harga:
 - **Filter by Date**: Filter transaksi berdasarkan periode
 - **Filter by Cashier**: Filter berdasarkan kasir (untuk CASHIER role)
 - **Search**: Cari transaksi by ID/customer
-- **Export**: Ekspor ke CSV/Excel (Kolom 'Kembalian' dan 'Piutang' dipisah untuk kejelasan)
+- **Export**: Ekspor ke CSV/Excel (Kolom 'Kembalian' dan 'Piutang' dipisah secara eksplisit untuk kejelasan data keuangan)
 - **Print**: Cetak laporan transaksi
 
 #### Pembayaran Cicilan
@@ -356,11 +357,12 @@ Setiap produk mendukung 4 tingkatan harga:
 #### Fitur
 
 - **Create Purchase**: Input pembelian baru dengan validasi pembayaran (tidak boleh melebihi total belanja)
-- **Itemized Purchase**: Support detail item (opsional), rincian barang tampil di deskripsi web/export/print
+- **Itemized Purchase**: Support detail item (opsional), rincian barang tampil di deskripsi web/export/print (termasuk qty item)
+- **Detail View**: Menampilkan "Rincian Barang Stok" dalam detail pembelian, mirip dengan detail transaksi
 - **Print Purchase Order**: Cetak bukti pemesanan pembelian
 - **Text Description**: Atau cukup deskripsi text
 - **Payment Tracking**: Track pembayaran hutang supplier
-- **Return Purchase**: Proses retur pembelian (Otomatis potong hutang jika ada)
+- **Return Purchase**: Proses retur pembelian (Otomatis potong hutang jika ada, mirip retur penjualan mengurangi piutang)
 - **Return Notes**: Lihat catatan alasan retur di detail
 - **Filter & Search**: Filter by date, supplier, dll
 - **Export & Print**: Ekspor dan cetak laporan
@@ -405,6 +407,12 @@ Setiap produk mendukung 4 tingkatan harga:
 
 **Monitor pemasukan dan pengeluaran operasional**
 
+#### Fitur Baru & Perbaikan
+
+- **Validasi & Konfirmasi**: Pop-up peringatan untuk setiap aksi pembayaran (piutang/utang) dan input manual untuk meminimalkan human error.
+- **Handling DP Tempo**: Pembayaran DP pada transaksi tempo kini tercatat dengan benar di arus kas (Logic Node.js disamakan dengan PHP).
+- **Filter Pembayaran Tunai**: Perbaikan bug filtering dimana pembayaran tunai tidak muncul di dropdown filter.
+
 #### Tipe Cash Flow
 
 1. **MASUK (Inflow)**
@@ -424,7 +432,7 @@ Setiap produk mendukung 4 tingkatan harga:
 - **Dari Transaksi Penjualan**: Otomatis catat cash in
 - **Dari Pembelian**: Otomatis catat cash out
 - **Dari Retur**: Otomatis catat refund
-- **Bank Info**: Jika transfer, nomor rekening ditambahkan ke deskripsi
+- **Bank Info**: Jika transfer, nama bank dan nomor rekening otomatis ditambahkan ke deskripsi (mis: `via BCA - 123456`)
 
 #### Manual Cash Flow
 
@@ -870,8 +878,8 @@ Toggle show/hide untuk:
 - **Mobile Friendly**: UI responsive untuk tablet/mobile
 - **Touch Optimized**: Tombol besar untuk touch screen
 - **Adaptive Layout**: Layout menyesuaikan ukuran layar
-- **Page Transitions**: Animasi fade-in yang halus diseluruh halaman aplikasi untuk pengalaman pengguna yang lebih baik
-- **Page Titles**: Deskripsi informatif di bawah judul halaman (Riwayat Pelanggan, Supplier, Barang Terjual, dll)
+- **Page Transitions**: Animasi fade-in yang halus diseluruh halaman aplikasi (termasuk SoldItems, Settings, dll) untuk pengalaman pengguna yang lebih baik
+- **Page Titles**: Deskripsi informatif di bawah judul halaman (Riwayat Pelanggan, Supplier, Barang Terjual, dll) mirip dengan halaman Riwayat Transfer
 
 ### 3. Data Export & Import
 
