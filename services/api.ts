@@ -2,7 +2,7 @@ import { Product, Transaction, User, CashFlow, Category, Customer, Supplier, Pur
 import { generateUUID, toMySQLDate } from "../utils";
 
 const isProd = import.meta.env.PROD;
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost/php_server/api';
 
 // Get headers with authentication
 const getHeaders = () => {
@@ -67,6 +67,17 @@ const parseNumber = (val: any): number => {
     return 0;
 };
 
+// Helper to ensure booleans are booleans
+const parseBoolean = (val: any): boolean => {
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'number') return val !== 0;
+    if (typeof val === 'string') {
+        const lower = val.toLowerCase();
+        return lower === 'true' || lower === '1';
+    }
+    return false;
+};
+
 const parseProduct = (p: any): Product => ({
     ...p,
     stock: parseNumber(p.stock),
@@ -82,6 +93,7 @@ const parseTransaction = (t: any): Transaction => ({
     totalAmount: parseNumber(t.totalAmount),
     amountPaid: parseNumber(t.amountPaid),
     change: parseNumber(t.change),
+    isReturned: parseBoolean(t.isReturned),
     items: Array.isArray(t.items) ? t.items.map((i: any) => ({
         ...i,
         qty: parseNumber(i.qty),
@@ -98,6 +110,7 @@ const parsePurchase = (p: any): Purchase => ({
     ...p,
     totalAmount: parseNumber(p.totalAmount),
     amountPaid: parseNumber(p.amountPaid),
+    isReturned: parseBoolean(p.isReturned),
     items: Array.isArray(p.items) ? p.items.map((i: any) => ({
         ...i,
         qty: parseNumber(i.qty),
