@@ -2,7 +2,7 @@ import { Product, Transaction, User, CashFlow, Category, Customer, Supplier, Pur
 import { generateUUID, toMySQLDate } from "../utils";
 
 const isProd = import.meta.env.PROD;
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost/php_server/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 // Get headers with authentication
 const getHeaders = () => {
