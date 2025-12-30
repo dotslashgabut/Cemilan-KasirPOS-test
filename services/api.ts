@@ -2,20 +2,16 @@ import { Product, Transaction, User, CashFlow, Category, Customer, Supplier, Pur
 import { generateUUID, toMySQLDate } from "../utils";
 
 const isProd = import.meta.env.PROD;
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost/php_server/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 // Get headers with authentication
+// Get headers with authentication
 const getHeaders = () => {
-    const currentUser = localStorage.getItem('pos_current_user');
+    // No longer need to manually adding token from localStorage
+    // HttpOnly cookie will be automatically sent with credentials: 'include'
     const headers: Record<string, string> = {
         'Content-Type': 'application/json'
     };
-
-    const token = localStorage.getItem('pos_token');
-
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
 
     return headers;
 };
@@ -27,6 +23,7 @@ const request = async (endpoint: string, options: RequestInit = {}) => {
 
     const config = {
         ...options,
+        credentials: 'include', // Important for sending/receiving cookies
         headers: {
             ...headers,
             ...options.headers,
@@ -835,9 +832,10 @@ export const ApiService = {
 
 
     // Authentication
-    login: async (username: string, password: string): Promise<{ token: string, user: User }> => {
+    login: async (username: string, password: string): Promise<{ user: User }> => {
         const res = await fetch(`${API_URL}/login`, {
             method: 'POST',
+            credentials: 'include', // Important!
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
@@ -855,5 +853,15 @@ export const ApiService = {
         }
 
         return await res.json();
+    },
+    logout: async () => {
+        try {
+            await fetch(`${API_URL}/logout`, {
+                method: 'POST',
+                credentials: 'include'
+            });
+        } catch (e) {
+            console.error("Logout failed", e);
+        }
     }
 };

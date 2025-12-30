@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { sequelize } from './models/index.js';
 import * as models from './models/index.js';
 import jwt from 'jsonwebtoken';
@@ -22,7 +23,11 @@ const app = express();
 
 // Security Middleware
 app.use(helmet());
-app.use(cors()); // Configure this for production!
+app.use(cookieParser());
+app.use(cors({
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'], // Adjust based on your frontend URL
+    credentials: true
+}));
 app.use(express.json({ limit: '50mb' }));
 
 // Rate Limiting
@@ -60,8 +65,7 @@ sequelize.sync({ alter: true }).then(() => {
 
 // Authentication Middleware
 const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = req.cookies.token;
 
     if (!token) return res.status(401).json({ error: 'Unauthorized: No token provided' });
 
@@ -102,11 +106,31 @@ app.post('/api/login', loginLimiter, async (req, res) => {
         const userWithoutPassword = user.toJSON();
         delete userWithoutPassword.password;
 
-        res.json({ token, user: userWithoutPassword });
+        // Set HttpOnly Cookie
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict', // 'lax' might be better if frontend is on different port but same localhost? 'strict' is fine for localhost if same site? No, ports differ.
+            // On localhost with different ports, it's considered cross-site for some strictness, but usually strict works if same TLD.
+            // However, sameSite 'none' + secure is needed for cross-site (different domains).
+            // For localhost dev (diff ports), 'Lax' or 'Strict' usually works.
+            // Let's stick to 'Strict' or omit sameSite for now if we want maximum compat?
+            // Actually 'Lax' is the modern default.
+            // Let's use 'Lax', often safer for navigation.
+            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', // Relax for dev if needed
+            maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        });
+
+        res.json({ user: userWithoutPassword });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: getSafeError(error) });
     }
+});
+
+app.post('/api/logout', (req, res) => {
+    res.clearCookie('token');
+    res.json({ message: 'Logged out successfully' });
 });
 
 // Generic CRUD generator
